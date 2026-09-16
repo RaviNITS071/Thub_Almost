@@ -12,6 +12,7 @@ import tenderRoutes from './routes/tender.routes.js';
 import bidRoutes from './routes/bid.routes.js';        
 import organizationRoutes from './routes/organization.routes.js';
 import documentRoutes from './routes/document.routes.js';
+import contractorRoutes from './routes/contractor.routes.js';
 import { globalErrorHandler } from './middleware/errorHandler.middleware.js';
 
 const app = express();
@@ -71,6 +72,7 @@ app.use('/api/v1/tenders', tenderRoutes);
 app.use('/api/v1/bids', bidRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/documents', documentRoutes);
+app.use('/api/v1/contractor', contractorRoutes);
 
 // Fallback aliases (ensures frontend works whether VITE_API_URL includes /api/v1 or just the domain)
 app.use('/auth', authRoutes);
@@ -78,6 +80,7 @@ app.use('/tenders', tenderRoutes);
 app.use('/bids', bidRoutes);
 app.use('/organizations', organizationRoutes);
 app.use('/documents', documentRoutes);
+app.use('/contractor', contractorRoutes);
 
 // 4. 404 Handler
 app.use((req, res, next) => {

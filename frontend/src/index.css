@@ -60,6 +60,43 @@
   background-color: #475569;
 }
 
+/* Dedicated Sleek Filter Section Scrollbar */
+.filter-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 transparent;
+}
+
+.dark .filter-scrollbar {
+  scrollbar-color: #475569 transparent;
+}
+
+.filter-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.filter-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 6px 0;
+}
+
+.filter-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #CBD5E1;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+.filter-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #0E3A5D;
+}
+
+.dark .filter-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #475569;
+}
+
+.dark .filter-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #3B82F6;
+}
+
 /* Hide scrollbar utility */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
