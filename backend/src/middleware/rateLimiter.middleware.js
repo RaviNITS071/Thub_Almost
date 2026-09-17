@@ -27,3 +27,27 @@ export const authLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
 });
+
+export const otpSendLimiter = rateLimit({
+  store: new RedisStore({
+    sendCommand: (...args) => redis.call(...args),
+    prefix: 'rl-otp-send:',
+  }),
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 10, // Max 10 OTP requests per IP per 15 min
+  message: { error: 'Too many verification code requests from this IP, please try again later.' },
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
+
+export const otpVerifyLimiter = rateLimit({
+  store: new RedisStore({
+    sendCommand: (...args) => redis.call(...args),
+    prefix: 'rl-otp-verify:',
+  }),
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 20, // Max 20 verification attempts per IP per 15 min to prevent brute force
+  message: { error: 'Too many verification attempts, please try again later.' },
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});

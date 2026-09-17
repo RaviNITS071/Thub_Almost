@@ -41,13 +41,13 @@ export function PreferenceModal() {
   return (
     <Dialog open={!preferences.isConfigured}>
       <DialogContent className="max-w-lg">
-        <DialogHeader className="mb-6 flex flex-row items-center gap-4 text-left">
-          <div className="w-12 h-12 rounded-2xl bg-dalBlue/10 dark:bg-blue-500/20 text-dalBlue dark:text-blue-400 flex items-center justify-center shrink-0">
-            <Sliders className="w-6 h-6" />
+        <DialogHeader className="mb-4 sm:mb-6 flex flex-row items-start sm:items-center gap-3 sm:gap-4 text-left">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-dalBlue/10 dark:bg-blue-500/20 text-dalBlue dark:text-blue-400 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+            <Sliders className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
           <div>
-            <DialogTitle>Tailor Your Tender Radar</DialogTitle>
-            <DialogDescription>Configure your business scope to prioritize high-value contract feeds.</DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">Tailor Your Tender Radar</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">Configure your business scope to prioritize high-value contract feeds.</DialogDescription>
           </div>
         </DialogHeader>
 
@@ -104,11 +104,11 @@ export function PreferenceModal() {
             </label>
           </div>
 
-          <div className="pt-4 border-t border-border dark:border-slate-800 flex justify-end gap-3 mt-6">
-            <Button variant="ghost" onClick={() => updatePreferences({ isConfigured: true })}>
+          <div className="pt-4 border-t border-border dark:border-slate-800 flex flex-col-reverse sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
+            <Button variant="ghost" onClick={() => updatePreferences({ isConfigured: true })} className="w-full sm:w-auto text-xs sm:text-sm">
               Skip for Now
             </Button>
-            <Button type="submit" variant="default" className="bg-chinarRed hover:bg-chinarRed-700 text-white gap-2">
+            <Button type="submit" variant="default" className="w-full sm:w-auto bg-chinarRed hover:bg-chinarRed-700 text-white gap-2 text-xs sm:text-sm">
               Apply Filters <ArrowRight className="w-4 h-4" />
             </Button>
           </div>

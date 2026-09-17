@@ -8,31 +8,31 @@ import { Button } from '@/components/ui/Button';
 
 export default function About() {
   return (
-    <div className="min-h-screen bg-paper dark:bg-slate-900 py-16 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
-      <div className="max-w-4xl mx-auto space-y-8">
+    <div className="min-h-screen bg-paper dark:bg-slate-900 py-10 sm:py-16 px-3 sm:px-6 lg:px-8 transition-colors duration-200">
+      <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8">
         
         {/* Mission Statement Card */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-8 sm:p-10 shadow-xs space-y-4">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-600">
-            <Landmark className="w-3.5 h-3.5 text-dalBlue dark:text-blue-400" />
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 sm:p-10 shadow-xs space-y-3 sm:space-y-4">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] sm:text-xs font-semibold border border-slate-200 dark:border-slate-600">
+            <Landmark className="w-3.5 h-3.5 text-dalBlue dark:text-blue-400 shrink-0" />
             <span>Platform Background</span>
           </div>
 
-          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
+          <h1 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 dark:text-white tracking-tight">
             Supporting Public Procurement Transparency in Jammu &amp; Kashmir
           </h1>
 
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
+          <p className="text-xs sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
             Public works contracts published across Jammu and Kashmir represent thousands of critical infrastructure, rural water supply, road macadamization, and power grid projects. Historically, navigating these tenders required traversing fragmented portals with short-lived session timeouts and unindexed attachments.
           </p>
-          <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
+          <p className="text-xs sm:text-base text-slate-600 dark:text-slate-300 leading-relaxed">
             TenderHub was established to provide contractors, civil engineers, and suppliers with a reliable, structured repository of official public tenders. We systematically index gazettes, verify document links, and provide clear work site clarity so local bidders can make informed decisions.
           </p>
         </div>
 
         {/* 3 Core Operating Standards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 shadow-xs space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 sm:p-6 shadow-xs space-y-2">
             <div className="w-10 h-10 rounded-lg bg-slate-100 dark:bg-slate-700 text-dalBlue dark:text-blue-400 flex items-center justify-center mb-3">
               <Database className="w-5 h-5" />
             </div>

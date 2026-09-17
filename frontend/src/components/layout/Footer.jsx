@@ -10,12 +10,12 @@ export function Footer() {
   return (
     <footer className="bg-slate-900 text-white pt-12 pb-8 border-t border-slate-800 mt-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-6 lg:gap-8">
           
           {/* Brand & Description */}
-          <div className="space-y-3 md:col-span-1">
+          <div className="space-y-3">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-dalBlue text-white flex items-center justify-center">
+              <div className="w-8 h-8 rounded-lg bg-dalBlue text-white flex items-center justify-center shrink-0">
                 <Landmark className="w-4 h-4 text-white" />
               </div>
               <span className="text-lg font-display font-bold tracking-tight text-white">
@@ -115,7 +115,7 @@ export function Footer() {
         </div>
 
         {/* Bottom Legal Bar */}
-        <div className="mt-10 pt-5 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-3">
+        <div className="mt-10 pt-5 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-3 text-center sm:text-left">
           <p>© {new Date().getFullYear()} TenderHub. Official tender notices remain the copyright of their respective issuing government authorities.</p>
           <div className="flex gap-4">
             <Link to="/about" className="hover:text-slate-300 transition-colors">Privacy</Link>

@@ -105,57 +105,57 @@ export default function Home() {
       <PreferenceModal />
 
       {/* Hero Section: Classical, Dignified & Authentic */}
-      <section className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 pt-12 pb-16 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto text-center space-y-6">
+      <section className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 pt-8 sm:pt-12 pb-12 sm:pb-16 px-3 sm:px-6 lg:px-8">
+        <div className="max-w-5xl mx-auto text-center space-y-4 sm:space-y-6">
           
           {/* Official Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold border border-slate-200 dark:border-slate-700">
-            <Landmark className="w-3.5 h-3.5 text-dalBlue dark:text-blue-400" />
-            <span>Jammu &amp; Kashmir Public Works &amp; e-Procurement Portal</span>
+          <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] sm:text-xs font-semibold border border-slate-200 dark:border-slate-700 max-w-full truncate">
+            <Landmark className="w-3.5 h-3.5 text-dalBlue dark:text-blue-400 shrink-0" />
+            <span className="truncate">Jammu &amp; Kashmir Public Works &amp; e-Procurement</span>
           </div>
 
           {/* Primary Headline */}
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-display font-black text-dalBlue dark:text-white tracking-tight leading-tight">
+          <h1 className="text-2xl sm:text-4xl lg:text-5xl font-display font-black text-dalBlue dark:text-white tracking-tight leading-tight">
             Explore Government Tenders Across Jammu &amp; Kashmir
           </h1>
 
           {/* Subtitle */}
-          <p className="text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed font-normal">
+          <p className="text-xs sm:text-base text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed font-normal">
             Track published civil infrastructure, irrigation, road works, electrical supplies, and municipal contracts across all 20 districts with verified official tender documents.
           </p>
 
           {/* Search Console */}
           <form 
             onSubmit={handleSearch}
-            className="max-w-2xl mx-auto mt-6 flex flex-col sm:flex-row items-stretch sm:items-center bg-white dark:bg-slate-800 rounded-xl p-2 border border-slate-300 dark:border-slate-700 shadow-sm focus-within:border-dalBlue dark:focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-dalBlue/10 transition-all gap-2"
+            className="max-w-2xl mx-auto mt-4 sm:mt-6 flex flex-col sm:flex-row items-stretch sm:items-center bg-white dark:bg-slate-800 rounded-2xl p-1.5 sm:p-2 border border-slate-300 dark:border-slate-700 shadow-sm focus-within:border-dalBlue dark:focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-dalBlue/10 transition-all gap-1.5 sm:gap-2"
           >
-            <div className="flex items-center flex-1 px-3 py-1">
-              <Search className="w-5 h-5 text-slate-400 shrink-0 mr-2" />
+            <div className="flex items-center flex-1 px-2.5 py-1 min-w-0">
+              <Search className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 shrink-0 mr-2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by tender name, department, or district (e.g. Baramulla, Civil Works)..."
-                className="w-full text-sm text-slate-900 dark:text-white placeholder:text-slate-400 bg-transparent focus:outline-none"
+                placeholder="Search tender name, department, or district..."
+                className="w-full text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 bg-transparent focus:outline-none truncate"
               />
             </div>
             <Button
               type="submit"
-              className="bg-dalBlue hover:bg-dalBlue-700 text-white font-bold px-6 py-2.5 rounded-lg text-sm transition-colors shrink-0"
+              className="w-full sm:w-auto bg-dalBlue hover:bg-dalBlue-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm transition-colors shrink-0"
             >
               Search Tenders
             </Button>
           </form>
 
           {/* Quick Filters */}
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium mr-1">Popular searches:</span>
+          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 pt-1 sm:pt-2">
+            <span className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mr-1">Popular searches:</span>
             {quickLocations.map((item, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => handleQuickClick(item.query)}
-                className="px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+                className="px-2.5 py-1 rounded-lg text-[11px] sm:text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
               >
                 {item.label}
               </button>
@@ -163,39 +163,39 @@ export default function Home() {
           </div>
 
           {/* Key Statistics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-8 mt-8 border-t border-slate-200 dark:border-slate-800 text-left">
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <div className="text-2xl sm:text-3xl font-mono font-bold text-dalBlue dark:text-white">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 pt-6 sm:pt-8 mt-6 sm:mt-8 border-t border-slate-200 dark:border-slate-800 text-left">
+            <div className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+              <div className="text-xl sm:text-2xl lg:text-3xl font-mono font-bold text-dalBlue dark:text-white truncate">
                 {isStatsLoading ? '...' : (stats?.activeTendersCount ?? 29)}
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
+              <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
                 Active Tender Notices
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <div className="text-2xl sm:text-3xl font-mono font-bold text-chinarRed">
+            <div className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+              <div className="text-xl sm:text-2xl lg:text-3xl font-mono font-bold text-chinarRed truncate">
                 {isStatsLoading ? '...' : formatCurrencyINR(stats?.totalValue ?? 30146323)}
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
+              <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
                 Total Estimated Value
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <div className="text-2xl sm:text-3xl font-mono font-bold text-dalBlue dark:text-white">
+            <div className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+              <div className="text-xl sm:text-2xl lg:text-3xl font-mono font-bold text-dalBlue dark:text-white truncate">
                 {isStatsLoading ? '...' : (stats?.authoritiesCount ?? 13)}
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
+              <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
                 State Departments
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-              <div className="text-2xl sm:text-3xl font-mono font-bold text-dalBlue dark:text-white">
+            <div className="p-3 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+              <div className="text-xl sm:text-2xl lg:text-3xl font-mono font-bold text-dalBlue dark:text-white">
                 20
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
+              <div className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 truncate">
                 Districts Covered
               </div>
             </div>
@@ -205,15 +205,15 @@ export default function Home() {
       </section>
 
       {/* 🚀 Animated Infinite Moving Carousel Section: Active Departments & Procurement Domains */}
-      <section className="bg-white dark:bg-slate-800/60 py-12 border-b border-slate-200 dark:border-slate-800 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
+      <section className="bg-white dark:bg-slate-800/60 py-10 sm:py-12 border-b border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 mb-5 sm:mb-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-3">
             <div>
               <div className="inline-flex items-center gap-1.5 text-xs font-bold text-chinarRed dark:text-red-400 uppercase tracking-wider mb-1">
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Live Active Pipeline</span>
               </div>
-              <h2 className="text-xl sm:text-2xl font-display font-bold text-dalBlue dark:text-white">
+              <h2 className="text-lg sm:text-2xl font-display font-bold text-dalBlue dark:text-white">
                 Procurement Departments &amp; Domains
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
@@ -225,7 +225,7 @@ export default function Home() {
               variant="outline"
               size="sm"
               onClick={() => navigate('/tenders')}
-              className="gap-1.5 text-xs hover:border-dalBlue"
+              className="gap-1.5 text-xs hover:border-dalBlue shrink-0"
             >
               <span>Explore All Tenders</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -236,11 +236,11 @@ export default function Home() {
         {/* Continuous Moving Track with Edge Gradient Masks */}
         <div className="relative w-full overflow-hidden group">
           {/* Gradient Edge Masks for Smooth Visual Fading */}
-          <div className="absolute left-0 top-0 w-16 sm:w-28 h-full bg-gradient-to-r from-white dark:from-slate-900 to-transparent z-10 pointer-events-none" />
-          <div className="absolute right-0 top-0 w-16 sm:w-28 h-full bg-gradient-to-l from-white dark:from-slate-900 to-transparent z-10 pointer-events-none" />
+          <div className="absolute left-0 top-0 w-8 sm:w-20 lg:w-28 h-full bg-gradient-to-r from-white dark:from-slate-900 to-transparent z-10 pointer-events-none" />
+          <div className="absolute right-0 top-0 w-8 sm:w-20 lg:w-28 h-full bg-gradient-to-l from-white dark:from-slate-900 to-transparent z-10 pointer-events-none" />
 
           <motion.div
-            className="flex gap-4 sm:gap-5 w-max py-2"
+            className="flex gap-3 sm:gap-5 w-max py-2"
             animate={{ x: ["0%", "-50%"] }}
             transition={{
               repeat: Infinity,
@@ -258,14 +258,14 @@ export default function Home() {
                   if (item.query.department) params.set('department', item.query.department);
                   navigate(`/tenders?${params.toString()}`);
                 }}
-                className="w-72 sm:w-80 bg-paper dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-dalBlue dark:hover:border-blue-400 p-4 sm:p-5 rounded-2xl cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-1 flex-shrink-0 flex flex-col justify-between group/card select-none"
+                className="w-64 sm:w-80 bg-paper dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-dalBlue dark:hover:border-blue-400 p-4 sm:p-5 rounded-2xl cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-1 flex-shrink-0 flex flex-col justify-between group/card select-none"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-2.5">
                     <span className="text-[10px] font-mono font-bold text-chinarRed dark:text-red-400 uppercase tracking-wider bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 px-2 py-0.5 rounded-md">
                       {item.count}
                     </span>
-                    <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate max-w-[130px]" title={item.subtitle}>
+                    <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 truncate max-w-[110px] sm:max-w-[130px]" title={item.subtitle}>
                       {item.subtitle}
                     </span>
                   </div>
@@ -292,7 +292,7 @@ export default function Home() {
 
       {/* Recent Tender Announcements Section */}
       {stats?.latestTenders && stats.latestTenders.length > 0 && (
-        <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        <section className="py-10 sm:py-12 px-3 sm:px-6 lg:px-8 max-w-7xl mx-auto">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
             <div>
               <h2 className="text-xl sm:text-2xl font-display font-bold text-dalBlue dark:text-white">
@@ -305,7 +305,7 @@ export default function Home() {
             
             <Link
               to="/tenders"
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-chinarRed hover:underline"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-chinarRed hover:underline shrink-0"
             >
               <span>View All {stats?.activeTendersCount ?? 29} Tenders</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -322,14 +322,14 @@ export default function Home() {
                 <div
                   key={tender._id}
                   onClick={() => navigate(`/tenders/${tender._id}`)}
-                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-dalBlue dark:hover:border-blue-400 rounded-xl p-5 shadow-xs transition-all cursor-pointer flex flex-col justify-between hover:shadow-md hover:-translate-y-0.5"
+                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-dalBlue dark:hover:border-blue-400 rounded-xl p-4 sm:p-5 shadow-xs transition-all cursor-pointer flex flex-col justify-between hover:shadow-md hover:-translate-y-0.5"
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs font-semibold text-dalBlue dark:text-blue-300 bg-slate-100 dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                      <span className="font-mono text-[11px] sm:text-xs font-semibold text-dalBlue dark:text-blue-300 bg-slate-100 dark:bg-slate-900 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 truncate max-w-[160px]">
                         {tender.sourceTenderId}
                       </span>
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">
                         {tender.productCategory || 'Works'}
                       </span>
                     </div>
@@ -346,11 +346,11 @@ export default function Home() {
 
                   <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1 font-mono font-bold text-dalBlue dark:text-blue-300">
-                      <IndianRupee className="w-3.5 h-3.5" />
+                      <IndianRupee className="w-3.5 h-3.5 shrink-0" />
                       <span>{formatCurrencyINR(tender.estimatedValue)}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
-                      <Calendar className="w-3.5 h-3.5" />
+                    <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 text-[11px] sm:text-xs">
+                      <Calendar className="w-3.5 h-3.5 shrink-0" />
                       <span>Closing: {formatDateDisplay(tender.closingDate)}</span>
                     </div>
                   </div>
@@ -362,9 +362,9 @@ export default function Home() {
       )}
 
       {/* Work Categories Section */}
-      <section className="bg-white dark:bg-slate-800/40 py-12 border-t border-slate-200 dark:border-slate-800 px-4 sm:px-6 lg:px-8">
+      <section className="bg-white dark:bg-slate-800/40 py-10 sm:py-12 border-t border-slate-200 dark:border-slate-800 px-3 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="mb-8">
+          <div className="mb-6 sm:mb-8">
             <h2 className="text-xl sm:text-2xl font-display font-bold text-dalBlue dark:text-white">
               Browse Tenders by Work Domain
             </h2>

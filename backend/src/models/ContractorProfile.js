@@ -17,7 +17,8 @@ const contractorProfileSchema = new mongoose.Schema({
     preferEmdExemption: { type: Boolean, default: false },
     isConfigured: { type: Boolean, default: false },
   },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: false },
+  savedTenders: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Tender' }],
 }, { timestamps: true });
 
 export default mongoose.model('ContractorProfile', contractorProfileSchema);

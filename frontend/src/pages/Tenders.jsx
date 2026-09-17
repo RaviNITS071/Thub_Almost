@@ -13,6 +13,7 @@ import {
   FileText, 
   ChevronLeft, 
   ChevronRight, 
+  ChevronDown,
   Clock, 
   Archive, 
   ArrowUpDown,
@@ -123,6 +124,7 @@ export default function Tenders() {
   const [sortBy, setSortBy] = useState('arrival');
   
   const [currentPage, setCurrentPage] = useState(1);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   // Active filter count for badge
   const activeFilterCount = [
@@ -176,13 +178,13 @@ export default function Tenders() {
   };
 
   return (
-    <div className="min-h-screen bg-paper dark:bg-slate-900 py-8 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
+    <div className="min-h-screen bg-paper dark:bg-slate-900 py-6 sm:py-8 px-3 sm:px-6 lg:px-8 transition-colors duration-200">
       <div className="max-w-7xl mx-auto">
         
         {/* Page Title & Reset Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-5 sm:mb-6">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold font-display text-slate-900 dark:text-white tracking-tight">
+            <h1 className="text-xl sm:text-3xl font-bold font-display text-slate-900 dark:text-white tracking-tight">
               Tender Notice Directory
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
@@ -192,16 +194,48 @@ export default function Tenders() {
           <Button 
             variant="outline" 
             onClick={handleReset} 
-            className="gap-1.5 text-xs self-start sm:self-auto hover:border-chinarRed hover:text-chinarRed transition-colors"
+            className="gap-1.5 text-xs self-start sm:self-auto hover:border-chinarRed hover:text-chinarRed transition-colors shrink-0"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Reset Filters
           </Button>
         </div>
 
+        {/* Mobile/Tablet Filter Accordion Toggle (< lg) */}
+        <div className="lg:hidden mb-4">
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
+            className="w-full flex items-center justify-between p-3.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xs text-xs font-bold text-dalBlue dark:text-blue-300 transition-all cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-dalBlue dark:text-blue-400 shrink-0" />
+              <span>{mobileFiltersOpen ? 'Hide Search Filters' : 'Show Search Filters'}</span>
+              {activeFilterCount > 0 && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-dalBlue text-white dark:bg-blue-600">
+                  {activeFilterCount} active
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {activeFilterCount > 0 && (
+                <span 
+                  onClick={(e) => { e.stopPropagation(); handleReset(); }}
+                  className="text-[11px] text-chinarRed hover:underline font-semibold"
+                >
+                  Reset
+                </span>
+              )}
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${mobileFiltersOpen ? 'rotate-180' : ''}`} />
+            </div>
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
           
           {/* ---------------- FILTER SIDEBAR ---------------- */}
-          <aside className="lg:col-span-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xs sticky top-20 flex flex-col max-h-[520px] sm:max-h-[560px] lg:max-h-[calc(100vh-6rem)] overflow-hidden">
+          <aside className={`lg:col-span-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xs lg:sticky lg:top-20 flex flex-col max-h-[520px] sm:max-h-[560px] lg:max-h-[calc(100vh-6rem)] overflow-hidden transition-all ${
+            mobileFiltersOpen ? 'flex mb-4 lg:mb-0' : 'hidden lg:flex'
+          }`}>
             {/* Pinned Header */}
             <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-slate-700/80 text-dalBlue dark:text-blue-400 bg-white dark:bg-slate-800 shrink-0 select-none">
               <div className="flex items-center gap-2">
@@ -393,24 +427,24 @@ export default function Tenders() {
           <main className="lg:col-span-3 space-y-4">
             
             {/* Top Tab Bar: Latest vs Archived Notices + Sorting */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2.5 rounded-2xl shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 sm:p-2.5 rounded-2xl shadow-xs">
               {/* Menu Tabs with High-Contrast Active States */}
-              <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900/80 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800">
+              <div className="grid grid-cols-2 sm:flex items-center gap-1 sm:gap-1.5 bg-slate-100 dark:bg-slate-900/80 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => {
                     setStatus('active');
                     setCurrentPage(1);
                   }}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-chinarRed ${
+                  className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-chinarRed ${
                     status === 'active'
                       ? 'bg-dalBlue text-white shadow-sm font-bold border border-dalBlue dark:bg-blue-600 dark:border-blue-500 ring-2 ring-dalBlue/20 dark:ring-blue-400/30'
                       : 'text-slate-600 dark:text-slate-400 hover:text-dalBlue dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 font-medium'
                   }`}
                 >
-                  <Clock className={`w-3.5 h-3.5 ${status === 'active' ? 'text-white' : 'text-dalBlue dark:text-blue-400'}`} />
-                  <span>Latest Notices</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
+                  <Clock className={`w-3.5 h-3.5 shrink-0 ${status === 'active' ? 'text-white' : 'text-dalBlue dark:text-blue-400'}`} />
+                  <span className="truncate">Latest Notices</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
                     status === 'active' 
                       ? 'bg-white/20 text-white' 
                       : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
@@ -425,15 +459,15 @@ export default function Tenders() {
                     setStatus('archived');
                     setCurrentPage(1);
                   }}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-chinarRed ${
+                  className={`flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs transition-all duration-150 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-chinarRed ${
                     status === 'archived'
                       ? 'bg-slate-800 text-white dark:bg-slate-700 shadow-sm font-bold border border-slate-800 dark:border-slate-600 ring-2 ring-slate-800/20 dark:ring-slate-500/30'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 font-medium'
                   }`}
                 >
-                  <Archive className={`w-3.5 h-3.5 ${status === 'archived' ? 'text-white' : 'text-slate-400'}`} />
-                  <span>Archived (Expired)</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
+                  <Archive className={`w-3.5 h-3.5 shrink-0 ${status === 'archived' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">Archived</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold shrink-0 ${
                     status === 'archived' 
                       ? 'bg-white/20 text-white' 
                       : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
@@ -444,16 +478,18 @@ export default function Tenders() {
               </div>
 
               {/* Sorting Selector */}
-              <div className="flex items-center gap-2 px-1 sm:px-2">
-                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Sort:</span>
+              <div className="flex items-center justify-between sm:justify-start gap-2 px-1 sm:px-2 w-full sm:w-auto">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Sort:</span>
+                </div>
                 <select
                   value={sortBy}
                   onChange={(e) => {
                     setSortBy(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-white hover:border-dalBlue dark:hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-dalBlue/30 focus:border-dalBlue cursor-pointer shadow-xs transition-all"
+                  className="flex-1 sm:flex-none bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-white hover:border-dalBlue dark:hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-dalBlue/30 focus:border-dalBlue cursor-pointer shadow-xs transition-all truncate"
                 >
                   <option value="arrival">Arrival Date (Newest First)</option>
                   <option value="closingAsc">Deadline (Soonest First)</option>

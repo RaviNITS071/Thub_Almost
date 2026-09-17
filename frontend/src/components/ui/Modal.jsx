@@ -20,7 +20,7 @@ export function Dialog({ open, onClose, children }) {
 
 export function DialogContent({ className, children }) {
   return (
-    <div className={cn("bg-white dark:bg-[#111827] border border-border dark:border-slate-800 rounded-3xl shadow-2xl w-full p-6 animate-in zoom-in-95 duration-200 relative text-charcoal dark:text-slate-100", className)}>
+    <div className={cn("bg-white dark:bg-[#111827] border border-border dark:border-slate-800 rounded-2xl sm:rounded-3xl shadow-2xl w-full max-h-[90vh] overflow-y-auto filter-scrollbar p-4 xs:p-5 sm:p-6 animate-in zoom-in-95 duration-200 relative text-charcoal dark:text-slate-100", className)}>
       {children}
     </div>
   );

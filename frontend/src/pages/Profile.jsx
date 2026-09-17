@@ -113,6 +113,9 @@ export default function Profile() {
           }
           setDbSyncStatus('synced');
         }
+
+        // Also refresh contractor-scoped saved tenders from MongoDB
+        useBookmarkStore.getState().fetchSavedTenders();
       } catch (err) {
         console.warn('Backend DB not reachable, using local storage cache:', err);
         if (isMounted) setDbSyncStatus('offline');
@@ -215,13 +218,13 @@ export default function Profile() {
   };
 
   return (
-    <div className="min-h-screen bg-paper dark:bg-slate-900 py-10 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-paper dark:bg-slate-900 py-6 sm:py-10 px-3 sm:px-6 lg:px-8 transition-colors duration-200">
+      <div className="max-w-6xl mx-auto space-y-5 sm:space-y-6">
         
         {/* Contractor Profile Header Card - Dynamically linked to profile store */}
-        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 sm:p-7 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 transition-all">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-dalBlue text-white flex items-center justify-center font-display font-bold text-xl shadow-xs shrink-0 tracking-wider">
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-7 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5 sm:gap-6 transition-all">
+          <div className="flex flex-col xs:flex-row items-start xs:items-center gap-3 sm:gap-4 w-full lg:w-auto">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-dalBlue text-white flex items-center justify-center font-display font-bold text-lg sm:text-xl shadow-xs shrink-0 tracking-wider">
               {getInitials(profile.name)}
             </div>
             <div className="space-y-1">
@@ -284,7 +287,7 @@ export default function Profile() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-200 dark:border-slate-700 gap-2 sm:gap-4 text-xs sm:text-sm font-semibold overflow-x-auto pb-0">
+        <div className="flex border-b border-slate-200 dark:border-slate-700 gap-2 sm:gap-4 text-xs sm:text-sm font-semibold overflow-x-auto scrollbar-hide touch-momentum pb-0 -mx-3 px-3 sm:mx-0 sm:px-0">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -334,7 +337,7 @@ export default function Profile() {
 
         {/* Tab 2: Contractor Credentials (Editable) */}
         {activeTab === 'company' && (
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 sm:p-7 space-y-5 max-w-3xl shadow-xs transition-all">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-7 space-y-5 max-w-3xl shadow-xs transition-all">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white font-display">
@@ -547,7 +550,7 @@ export default function Profile() {
 
         {/* Tab 3: Filter Preferences (Editable) */}
         {activeTab === 'alerts' && (
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 sm:p-7 space-y-5 max-w-3xl shadow-xs transition-all">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-7 space-y-5 max-w-3xl shadow-xs transition-all">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-700">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white font-display">

@@ -105,3 +105,25 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Mobile & Touch Responsive Enhancements */
+@layer utilities {
+  .touch-momentum {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* Prevent accidental horizontal document scroll on smaller touch screens */
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  -webkit-tap-highlight-color: transparent;
+}

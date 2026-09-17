@@ -15,7 +15,14 @@ const envVarsSchema = Joi.object({
   OPENAI_API_KEY: Joi.string().allow('').optional(), // Make optional until AI is integrated
   S3_BUCKET: Joi.string().allow('').optional(),
   UPLOAD_DIR: Joi.string().default('uploads'),
-  CORS_ORIGIN: Joi.string().default('http://localhost:5173')
+  CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
+  FRONTEND_URL: Joi.string().default('http://localhost:5173'),
+  GOOGLE_CLIENT_ID: Joi.string().allow('').optional(),
+  GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
+  GOOGLE_CALLBACK_URL: Joi.string().default('http://localhost:8000/api/v1/auth/google/callback'),
+  EMAIL_PROVIDER: Joi.string().valid('resend', 'brevo', 'smtp', 'console').default('resend'),
+  EMAIL_FROM: Joi.string().default('TenderHub <no-reply@tenderhub.in>'),
+  EMAIL_API_KEY: Joi.string().allow('').optional(),
 }).unknown();
 
 const { value: envVars, error } = envVarsSchema.validate(process.env);

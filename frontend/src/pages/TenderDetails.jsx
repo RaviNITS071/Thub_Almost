@@ -74,19 +74,19 @@ export default function TenderDetails() {
   const workLoc = extractDetailedWorkLocation(tender);
 
   return (
-    <div className="min-h-screen bg-paper dark:bg-slate-900 py-8 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-paper dark:bg-slate-900 py-6 sm:py-8 px-3 sm:px-6 lg:px-8 transition-colors duration-200">
+      <div className="max-w-6xl mx-auto space-y-5 sm:space-y-6">
         
         {/* Navigation & Header */}
         <div>
           <button 
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-dalBlue dark:hover:text-white mb-4 transition-colors"
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-dalBlue dark:hover:text-white mb-3 sm:mb-4 transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" /> Back to Directory
           </button>
 
-          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 shadow-xs relative">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 sm:p-6 shadow-xs relative">
             <div className="flex flex-col md:flex-row justify-between items-start gap-4">
               <div className="space-y-2 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -119,11 +119,11 @@ export default function TenderDetails() {
                 </div>
               </div>
 
-              <div className="flex sm:flex-col gap-2.5 w-full md:w-auto shrink-0">
+              <div className="flex flex-col sm:flex-row md:flex-col gap-2 sm:gap-2.5 w-full md:w-auto shrink-0">
                 <Button 
                   onClick={() => toggleBookmark(tender)}
                   variant={bookmarked ? "outline" : "default"}
-                  className={`w-full text-xs font-bold py-2 ${
+                  className={`w-full text-xs font-bold py-2 sm:py-2.5 ${
                     bookmarked 
                       ? 'border-red-200 text-chinarRed hover:bg-red-50 dark:hover:bg-red-950/40' 
                       : 'bg-dalBlue hover:bg-dalBlue-700 text-white'
@@ -136,7 +136,7 @@ export default function TenderDetails() {
                 <Button 
                   onClick={handleOpenPortalModal}
                   variant="outline" 
-                  className="w-full gap-1.5 text-xs font-semibold py-2"
+                  className="w-full gap-1.5 text-xs font-semibold py-2 sm:py-2.5"
                 >
                   Original Portal <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                 </Button>
@@ -257,54 +257,58 @@ export default function TenderDetails() {
 
             {/* Payment Instruments & Covers */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 shadow-xs">
+              <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5 shadow-xs">
                 <h3 className="text-sm font-bold font-display text-slate-900 dark:text-white mb-3 border-b border-slate-100 dark:border-slate-700 pb-2 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4 text-slate-500" /> Payment Instruments
+                  <CreditCard className="w-4 h-4 text-slate-500 shrink-0" /> Payment Instruments
                 </h3>
                 {tender.paymentMode === 'Offline' && tender.offlineInstruments?.length > 0 ? (
-                  <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
-                    <thead className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase text-slate-500 border-y border-slate-100 dark:border-slate-700">
-                      <tr>
-                        <th className="px-2.5 py-1.5">S.No</th>
-                        <th className="px-2.5 py-1.5">Instrument Type</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tender.offlineInstruments.map((inst, idx) => (
-                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/60">
-                          <td className="px-2.5 py-1.5 font-mono">{inst.sNo}</td>
-                          <td className="px-2.5 py-1.5">{inst.instrumentType}</td>
+                  <div className="overflow-x-auto filter-scrollbar -mx-1 px-1">
+                    <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300 min-w-[240px]">
+                      <thead className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase text-slate-500 border-y border-slate-100 dark:border-slate-700">
+                        <tr>
+                          <th className="px-2.5 py-1.5">S.No</th>
+                          <th className="px-2.5 py-1.5">Instrument Type</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {tender.offlineInstruments.map((inst, idx) => (
+                          <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/60">
+                            <td className="px-2.5 py-1.5 font-mono">{inst.sNo}</td>
+                            <td className="px-2.5 py-1.5">{inst.instrumentType}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <p className="text-xs text-slate-500">Online payment mode or no offline instruments specified.</p>
                 )}
               </section>
 
-              <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-5 shadow-xs">
+              <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5 shadow-xs">
                 <h3 className="text-sm font-bold font-display text-slate-900 dark:text-white mb-3 border-b border-slate-100 dark:border-slate-700 pb-2 flex items-center gap-1.5">
-                  <Layers className="w-4 h-4 text-slate-500" /> Covers Information
+                  <Layers className="w-4 h-4 text-slate-500 shrink-0" /> Covers Information
                 </h3>
-                <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
-                  <thead className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase text-slate-500 border-y border-slate-100 dark:border-slate-700">
-                    <tr>
-                      <th className="px-2.5 py-1.5">No</th>
-                      <th className="px-2.5 py-1.5">Type</th>
-                      <th className="px-2.5 py-1.5">Document</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tender.coversInfo?.map((cover, idx) => (
-                      <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/60">
-                        <td className="px-2.5 py-1.5 font-mono">{cover.coverNo}</td>
-                        <td className="px-2.5 py-1.5">{cover.coverType || 'Fee/PreQual/Technical'}</td>
-                        <td className="px-2.5 py-1.5 font-mono uppercase font-bold text-dalBlue dark:text-blue-400">{cover.documentType}</td>
+                <div className="overflow-x-auto filter-scrollbar -mx-1 px-1">
+                  <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300 min-w-[260px]">
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase text-slate-500 border-y border-slate-100 dark:border-slate-700">
+                      <tr>
+                        <th className="px-2.5 py-1.5">No</th>
+                        <th className="px-2.5 py-1.5">Type</th>
+                        <th className="px-2.5 py-1.5">Document</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {tender.coversInfo?.map((cover, idx) => (
+                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/60">
+                          <td className="px-2.5 py-1.5 font-mono">{cover.coverNo}</td>
+                          <td className="px-2.5 py-1.5">{cover.coverType || 'Fee/PreQual/Technical'}</td>
+                          <td className="px-2.5 py-1.5 font-mono uppercase font-bold text-dalBlue dark:text-blue-400">{cover.documentType}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </div>
             
@@ -467,11 +471,11 @@ export default function TenderDetails() {
 
       {/* Official Portal Helper Dialog */}
       <Dialog open={isPortalModalOpen} onClose={() => setIsPortalModalOpen(false)}>
-        <DialogContent className="p-0 overflow-hidden max-w-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl">
-          <div className="bg-dalBlue p-5 text-white relative">
+        <DialogContent className="p-0 overflow-hidden max-w-lg w-full max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-2xl">
+          <div className="bg-dalBlue p-4 sm:p-5 text-white relative shrink-0">
             <button
               onClick={() => setIsPortalModalOpen(false)}
-              className="absolute top-4 right-4 text-white/70 hover:text-white p-1 rounded-lg"
+              className="absolute top-4 right-4 text-white/70 hover:text-white p-1 rounded-lg cursor-pointer"
               aria-label="Close modal"
             >
               <X className="w-4 h-4" />
@@ -479,7 +483,7 @@ export default function TenderDetails() {
             <div className="flex items-center gap-1.5 mb-1 text-amber-300 text-xs font-bold uppercase">
               <ExternalLink className="w-3.5 h-3.5" /> Official Government Portal
             </div>
-            <DialogTitle className="text-lg font-bold text-white">
+            <DialogTitle className="text-base sm:text-lg font-bold text-white">
               Access Notice on JK eProcurement
             </DialogTitle>
             <DialogDescription className="text-white/80 text-xs mt-0.5">
@@ -487,7 +491,7 @@ export default function TenderDetails() {
             </DialogDescription>
           </div>
 
-          <div className="p-5 space-y-3.5 text-xs">
+          <div className="p-4 sm:p-5 space-y-3.5 text-xs overflow-y-auto filter-scrollbar flex-1">
             <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/40 flex items-start gap-2">
               <Info className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
               <div className="text-slate-700 dark:text-slate-300 leading-relaxed">
