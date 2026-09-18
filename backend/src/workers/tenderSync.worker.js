@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import { JKTenderAdapter } from '../services/adapters/JKTenderAdapter.js';
 import SyncJob from '../models/SyncJob.js';
 import Tender from '../models/Tender.js';
+import SystemLog from '../models/SystemLog.js';
 
 const logger = pino();
 const redisUrl = new URL(env.REDIS_URL);
@@ -16,14 +17,13 @@ const connection = {
 };
 
 /**
- * Real-time saving logic for MongoDB with full metadata
+ * Real-time saving logic for MongoDB with metadata preservation
  */
 async function saveDetailedTendersToDatabase(pageData, adapter) {
-  if (!pageData || pageData.length === 0) return 0;
+  if (!pageData || pageData.length === 0) return { newCount: 0, updatedCount: 0 };
 
-  // Log updated to reflect real-time single saving
-  logger.info(`[Worker] Saving ${pageData.length} tender(s) in real-time to DB...`);
   let newCount = 0;
+  let updatedCount = 0;
 
   const savePromises = pageData.map(async (raw) => {
     try {
@@ -34,11 +34,12 @@ async function saveDetailedTendersToDatabase(pageData, adapter) {
       if (!normalized.pdfUrls || normalized.pdfUrls.length === 0) {
         const existingTender = await Tender.findOne(
           { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
-          { pdfUrls: 1, nitDocuments: 1 }
+          { pdfUrls: 1, nitDocuments: 1, pdfFetchStatus: 1 }
         );
         if (existingTender && existingTender.pdfUrls && existingTender.pdfUrls.length > 0) {
           delete updateFields.pdfUrls;
           delete updateFields.nitDocuments;
+          updateFields.pdfFetchStatus = 'COMPLETED';
         }
       }
 
@@ -62,6 +63,7 @@ async function saveDetailedTendersToDatabase(pageData, adapter) {
         newCount++;
         logger.info(`[Worker] Inserted new tender: ${normalized.sourceTenderId} (PDFs: ${normalized.pdfUrls?.length || 0})`);
       } else {
+        updatedCount++;
         logger.info(`[Worker] Synchronized existing tender: ${normalized.sourceTenderId} (PDFs: ${normalized.pdfUrls?.length || 0})`);
       }
     } catch (err) {
@@ -70,40 +72,123 @@ async function saveDetailedTendersToDatabase(pageData, adapter) {
   });
 
   await Promise.all(savePromises);
-  return newCount;
+  return { newCount, updatedCount };
 }
 
 export const tenderSyncWorker = new Worker('TenderQueue', async (job) => {
-  logger.info(`Processing Tender Sync Job: ${job.id}`);
+  const startTime = Date.now();
+  logger.info(`Processing Tender Sync Job: ${job.name} (ID: ${job.id})`);
 
   const adapter = new JKTenderAdapter();
-  const syncRecord = await SyncJob.create({ sourcePortal: adapter.portalName });
-  let newFound = 0;
+  const triggeredBy = job.data?.triggeredBy || 'CRON_SCHEDULE';
 
-  // Callback is now triggered per-tender in real-time
+  const syncRecord = await SyncJob.create({ 
+    sourcePortal: adapter.portalName,
+    triggeredBy,
+    status: 'running',
+  });
+
+  // Dedicated Job: Retry Missing PDFs Only
+  if (job.name === 'retry-missing-pdfs') {
+    try {
+      const pendingTenders = await Tender.find({
+        pdfFetchStatus: 'PENDING',
+        isDocumentAvailable: true,
+        closingDate: { $gt: new Date() }
+      }).limit(50);
+
+      logger.info(`[Worker] Found ${pendingTenders.length} pending tenders needing PDF recovery.`);
+      const result = await adapter.retryMissingPdfs(pendingTenders);
+
+      syncRecord.status = 'completed';
+      syncRecord.pdfsDownloaded = result.updatedCount;
+      syncRecord.durationMs = Date.now() - startTime;
+      await syncRecord.save();
+
+      await SystemLog.create({
+        level: 'INFO',
+        source: 'WORKER_SCRAPER',
+        message: `Missing PDF recovery job completed: recovered ${result.updatedCount} tender documents.`,
+        metadata: { durationMs: syncRecord.durationMs }
+      }).catch(() => {});
+
+      return { recovered: result.updatedCount };
+    } catch (err) {
+      syncRecord.status = 'failed';
+      syncRecord.errorMessage = err.message;
+      syncRecord.durationMs = Date.now() - startTime;
+      await syncRecord.save();
+      throw err;
+    }
+  }
+
+  // Standard Job: Fetch Latest Tenders & Recover Missing
+  let totalNew = 0;
+  let totalUpdated = 0;
+
   const savePageToDb = async (pageData) => {
-    const addedCount = await saveDetailedTendersToDatabase(pageData, adapter);
-    newFound += addedCount;
+    const { newCount, updatedCount } = await saveDetailedTendersToDatabase(pageData, adapter);
+    totalNew += newCount;
+    totalUpdated += updatedCount;
   };
 
   try {
-    await adapter.fetchList(1, { syncMode: 'FULL' }, savePageToDb);
+    const crawlStats = await adapter.fetchList(1, { syncMode: 'LATEST', limit: 100 }, savePageToDb);
+
+    // Auto-recovery pass: Also retry up to 15 pending missing PDFs
+    try {
+      const missingToRetry = await Tender.find({
+        pdfFetchStatus: 'PENDING',
+        isDocumentAvailable: true,
+        closingDate: { $gt: new Date() }
+      }).limit(15);
+
+      if (missingToRetry.length > 0) {
+        logger.info(`[Worker] Running secondary pass for ${missingToRetry.length} missing PDFs...`);
+        const retryResult = await adapter.retryMissingPdfs(missingToRetry);
+        crawlStats.pdfsSecured = (crawlStats.pdfsSecured || 0) + (retryResult.updatedCount || 0);
+      }
+    } catch (retryErr) {
+      logger.warn(`[Worker] Secondary missing PDF pass warning: ${retryErr.message}`);
+    }
 
     syncRecord.status = 'completed';
-    syncRecord.newTendersFound = newFound;
+    syncRecord.itemsProcessed = crawlStats.totalProcessed || (totalNew + totalUpdated);
+    syncRecord.newTendersFound = totalNew;
+    syncRecord.updatedTenders = totalUpdated;
+    syncRecord.pdfsDownloaded = crawlStats.pdfsSecured || 0;
+    syncRecord.missingPdfCount = crawlStats.missingPdfs || 0;
+    syncRecord.durationMs = Date.now() - startTime;
     await syncRecord.save();
 
-    logger.info(`Sync complete. Total new tenders added: ${newFound}`);
+    logger.info(`✅ Sync complete. Processed: ${syncRecord.itemsProcessed}, New: ${totalNew}, Updated: ${totalUpdated}, PDFs: ${syncRecord.pdfsDownloaded}`);
+
+    await SystemLog.create({
+      level: 'INFO',
+      source: 'WORKER_SCRAPER',
+      message: `Tender ingestion completed (${triggeredBy}): ${totalNew} new tenders, ${totalUpdated} refreshed, ${syncRecord.pdfsDownloaded} PDFs secured.`,
+      metadata: { durationMs: syncRecord.durationMs, itemsProcessed: syncRecord.itemsProcessed }
+    }).catch(() => {});
 
   } catch (error) {
     logger.error(`Sync Job Failed: ${error.message}`);
     syncRecord.status = 'failed';
     syncRecord.errorMessage = error.message;
+    syncRecord.durationMs = Date.now() - startTime;
     await syncRecord.save();
+
+    await SystemLog.create({
+      level: 'ERROR',
+      source: 'WORKER_SCRAPER',
+      message: `Tender ingestion failed (${triggeredBy}): ${error.message}`,
+      stack: error.stack,
+      metadata: { durationMs: syncRecord.durationMs }
+    }).catch(() => {});
+
     throw error;
   }
 }, { 
   connection, 
-  lockDuration: 600000,   // 10 minutes lock duration to prevent job stalling during CAPTCHA
+  lockDuration: 600000,   // 10 minutes lock duration
   maxStalledCount: 3 
 });

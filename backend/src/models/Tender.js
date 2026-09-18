@@ -80,8 +80,15 @@ const tenderSchema = new mongoose.Schema({
   closingDate: { type: Date, index: true },
 
   
- // --- Documents & Storage (Cloudflare R2 mapped) ---
-  isDocumentAvailable: { type: Boolean, default: true }, // NAYA FLAG YAHAN AAYEGA
+  // --- Documents & Storage (Cloudflare R2 mapped) ---
+  isDocumentAvailable: { type: Boolean, default: true },
+  pdfFetchStatus: { 
+    type: String, 
+    enum: ['COMPLETED', 'PENDING', 'NOT_AVAILABLE', 'FAILED'], 
+    default: 'PENDING',
+    index: true 
+  },
+  pdfRetryCount: { type: Number, default: 0 },
   nitDocuments: [{
     documentName: { type: String },
     description: { type: String },
@@ -101,11 +108,14 @@ const tenderSchema = new mongoose.Schema({
   invitingAuthorityName: { type: String },
   invitingAuthorityAddress: { type: String },
 
-  status: { type: String, default: 'ACTIVE' }
+  status: { type: String, default: 'ACTIVE', index: true },
+  archivedAt: { type: Date, index: true }
 }, { timestamps: true });
 
-// Indexes for fast filtering and deduplication
+// Indexes for fast filtering, deduplication, and retention management
 tenderSchema.index({ sourcePortal: 1, sourceTenderId: 1 }, { unique: true });
 tenderSchema.index({ organisationChain: 1, closingDate: 1 });
+tenderSchema.index({ status: 1, closingDate: 1 });
+tenderSchema.index({ pdfFetchStatus: 1, closingDate: 1 });
 
 export default mongoose.model('Tender', tenderSchema);

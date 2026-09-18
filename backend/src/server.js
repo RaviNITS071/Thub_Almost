@@ -2,6 +2,7 @@ import app from './app.js';
 import { connectDB, closeDB } from './config/db.js';
 import { redis } from './config/redis.js';
 import { env } from './config/env.js';
+import { schedulerService } from './services/scheduler.service.js';
 import pino from 'pino';
 
 const logger = pino();
@@ -13,6 +14,10 @@ const startServer = async () => {
     
     const server = app.listen(env.PORT, () => {
       logger.info(`Server running in ${env.NODE_ENV} mode on port ${env.PORT}`);
+      // Initialize automated schedules (9AM, 10AM, 1PM, 3PM, 6:30PM & archive retention purge)
+      schedulerService.init().catch((err) => {
+        logger.error(`Failed to initialize scheduler: ${err.message}`);
+      });
     });
 
     // Graceful Shutdown Logic
