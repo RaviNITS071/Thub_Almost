@@ -167,10 +167,9 @@ export const uploadFileToR2 = async ({ filePath, fileName, tenderId, publishedDa
     };
 
     await r2.send(new PutObjectCommand(uploadParams));
-    logger.info(`Successfully uploaded ${fileName} to R2 at key: ${key}`);
-
-    // Asynchronous Non-Blocking Secondary Backup Mirroring (Zero Scraper Overhead)
-    const backupClient = getBackupR2Client();
+    // Optional Asynchronous Non-Blocking Secondary Backup Mirroring
+    const enableRealtimeMirror = process.env.ENABLE_REALTIME_R2_MIRROR === 'true';
+    const backupClient = enableRealtimeMirror ? getBackupR2Client() : null;
     const backupBucket = process.env.BACKUP_R2_BUCKET_NAME;
     if (backupClient && backupBucket) {
       // Fire-and-forget in background without blocking scraper execution
@@ -218,8 +217,9 @@ export const uploadJsonToR2 = async ({ jsonData, fileName = 'tender.json', tende
     }));
     logger.info(`Successfully saved self-describing metadata ${fileName} to R2 at: ${key}`);
 
-    // Non-blocking async mirroring to secondary backup R2
-    const backupClient = getBackupR2Client();
+    // Optional non-blocking async mirroring to secondary backup R2
+    const enableRealtimeMirror = process.env.ENABLE_REALTIME_R2_MIRROR === 'true';
+    const backupClient = enableRealtimeMirror ? getBackupR2Client() : null;
     const backupBucket = process.env.BACKUP_R2_BUCKET_NAME;
     if (backupClient && backupBucket) {
       backupClient.send(new PutObjectCommand({
