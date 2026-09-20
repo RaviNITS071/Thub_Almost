@@ -98,10 +98,13 @@ async function run() {
   let pdfCount = 0;
   let missingPdfCount = 0;
   let lastCheckpointState = null;
+  let isCrawlComplete = false;
+  let consecutiveErrors = 0;
+  const MAX_RETRY_ATTEMPTS = 50;
 
   // Handle Ctrl+C gracefully
   const handleInterrupt = async (signal) => {
-    console.log(`\n⚠️ [${signal}] Process interrupted. Checkpoint is saved at .crawl_checkpoint.json`);
+    console.log(`\n⚠️ [${signal}] Process explicitly interrupted by user. Checkpoint is saved at .crawl_checkpoint.json`);
     console.log(`👉 You can resume anytime simply by running: npm run scrape:all\n`);
     await telegramService.sendCrawlError({
       mode: 'FULL',
@@ -117,206 +120,248 @@ async function run() {
       }).catch(() => {});
     }
     await closeDB().catch(() => {});
-    process.exit(1);
+    process.exit(0);
   };
 
   process.once('SIGINT', () => handleInterrupt('SIGINT'));
   process.once('SIGTERM', () => handleInterrupt('SIGTERM'));
 
-  try {
-    syncJob = await SyncJob.create({
-      sourcePortal: 'JK_TENDERS',
-      status: 'running',
-      triggeredBy: 'ADMIN_MANUAL',
-      itemsProcessed: checkpoint?.totalProcessed || 0
-    });
+  while (!isCrawlComplete && consecutiveErrors < MAX_RETRY_ATTEMPTS) {
+    let adapter = new JKTenderAdapter();
 
-    const result = await adapter.fetchList(1, {
-      syncMode: 'DEPARTMENT',
-      limit,
-      countSkippedTowardsLimit: false,
-      resumeFrom,
-      onCheckpoint: async (cp) => {
-        lastCheckpointState = {
-          mode: 'DEPARTMENT',
-          orgIndex: cp.orgIndex,
-          orgName: cp.orgName,
-          orgPageNum: cp.orgPageNum,
-          lastTenderId: cp.lastTenderId,
-          totalProcessed: (checkpoint?.totalProcessed || 0) + savedCount,
-          status: cp.status,
-          updatedAt: new Date().toISOString()
+    try {
+      // Reload the latest checkpoint state from disk
+      checkpoint = loadCheckpoint();
+      if (checkpoint) {
+        resumeFrom = {
+          orgIndex: checkpoint.orgIndex || 0,
+          orgName: checkpoint.orgName || '',
+          orgPageNum: checkpoint.orgPageNum || 1,
+          lastTenderId: checkpoint.lastTenderId || null
         };
-
-        if (cp.status === 'COMPLETED') {
-          clearCheckpoint();
-        } else {
-          saveCheckpoint(lastCheckpointState);
-        }
-
-        // Send periodic Telegram progress ping (throttled)
-        telegramService.sendCrawlProgress({
-          mode: 'FULL',
-          orgName: cp.orgName,
-          orgIndex: cp.orgIndex,
-          totalOrgs: cp.totalOrgs,
-          savedCount,
-          skippedCount,
-          pdfCount,
-          boqCount,
-          elapsedSeconds: Math.floor((Date.now() - startTime) / 1000)
-        });
-
-        if (syncJob) {
-          await SyncJob.findByIdAndUpdate(syncJob._id, {
-            itemsProcessed: (checkpoint?.totalProcessed || 0) + savedCount + skippedCount,
-            newTendersFound: (checkpoint?.totalProcessed || 0) + savedCount,
-            pdfsDownloaded: pdfCount,
-            missingPdfCount
-          }).catch(() => {});
-        }
-      },
-      shouldSkipTender: async (sourceTenderId) => {
-        try {
-          const existing = await Tender.findOne({
-            sourcePortal: 'JK_TENDERS',
-            sourceTenderId
-          }).select('pdfFetchStatus').lean();
-
-          if (existing && existing.pdfFetchStatus === 'COMPLETED') {
-            skippedCount++;
-            return true;
-          }
-          return false;
-        } catch (e) {
-          return false;
-        }
+        console.log(`\n🔄 [AUTO-RESUME] Resuming crawl from "${checkpoint.orgName}" (Index: ${(checkpoint.orgIndex || 0) + 1}, Page: ${checkpoint.orgPageNum || 1})...`);
       }
-    }, async (batch) => {
-      for (const tender of batch) {
-        try {
-          const normalized = adapter.normalize(tender);
 
-          const existing = await Tender.findOne({
-            sourcePortal: normalized.sourcePortal,
-            sourceTenderId: normalized.sourceTenderId
-          }).lean();
+      syncJob = await SyncJob.create({
+        sourcePortal: 'JK_TENDERS',
+        status: 'running',
+        triggeredBy: 'ADMIN_MANUAL',
+        itemsProcessed: (checkpoint?.totalProcessed || 0) + savedCount + skippedCount
+      }).catch(() => null);
 
-          if (existing) {
-            // Merge nitDocuments without duplicates
-            const existingNit = existing.nitDocuments || [];
-            const newNit = normalized.nitDocuments || [];
-            const mergedNit = [...existingNit];
-            for (const doc of newNit) {
-              if (!mergedNit.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
-                mergedNit.push(doc);
-              }
-            }
-            normalized.nitDocuments = mergedNit;
+      const result = await adapter.fetchList(1, {
+        syncMode: 'DEPARTMENT',
+        limit,
+        countSkippedTowardsLimit: false,
+        resumeFrom,
+        onCheckpoint: async (cp) => {
+          lastCheckpointState = {
+            mode: 'DEPARTMENT',
+            orgIndex: cp.orgIndex,
+            orgName: cp.orgName,
+            orgPageNum: cp.orgPageNum,
+            lastTenderId: cp.lastTenderId,
+            totalProcessed: (checkpoint?.totalProcessed || 0) + savedCount,
+            status: cp.status,
+            updatedAt: new Date().toISOString()
+          };
 
-            // Merge pdfUrls without duplicates
-            const existingPdfs = existing.pdfUrls || [];
-            const newPdfs = normalized.pdfUrls || [];
-            normalized.pdfUrls = Array.from(new Set([...existingPdfs, ...newPdfs]));
-
-            // Merge workItemDocuments without duplicates
-            const existingWork = existing.workItemDocuments || [];
-            const newWork = normalized.workItemDocuments || [];
-            const mergedWork = [...existingWork];
-            for (const doc of newWork) {
-              if (!mergedWork.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
-                mergedWork.push(doc);
-              }
-            }
-            normalized.workItemDocuments = mergedWork;
-
-            if (!normalized.boqFileUrl && existing.boqFileUrl) {
-              normalized.boqFileUrl = existing.boqFileUrl;
-            }
-            if (!normalized.boqZipUrl && existing.boqZipUrl) {
-              normalized.boqZipUrl = existing.boqZipUrl;
-              normalized.zipFileName = existing.zipFileName;
-              normalized.zipFileSizeKb = existing.zipFileSizeKb;
-            }
+          if (cp.status === 'COMPLETED') {
+            clearCheckpoint();
+          } else {
+            saveCheckpoint(lastCheckpointState);
           }
 
-          await Tender.findOneAndUpdate(
-            { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
-            { $set: normalized },
-            { upsert: true, returnDocument: 'after' }
-          );
+          // Reset consecutive errors upon successful checkpoint progression
+          consecutiveErrors = 0;
 
-          savedCount++;
-          if (normalized.pdfUrls && normalized.pdfUrls.length > 0) pdfCount += normalized.pdfUrls.length;
-          if (normalized.boqZipUrl || normalized.boqFileUrl) boqCount++;
-          if (normalized.pdfFetchStatus === 'PENDING') missingPdfCount++;
+          // Send periodic Telegram progress ping (throttled)
+          telegramService.sendCrawlProgress({
+            mode: 'FULL',
+            orgName: cp.orgName,
+            orgIndex: cp.orgIndex,
+            totalOrgs: cp.totalOrgs,
+            savedCount,
+            skippedCount,
+            pdfCount,
+            boqCount,
+            elapsedSeconds: Math.floor((Date.now() - startTime) / 1000)
+          });
 
-          console.log(`✅ [Saved: ${savedCount} | Skipped: ${skippedCount}] ${normalized.sourceTenderId} (${normalized.departmentCode || 'GEN'})`);
-          console.log(`   📁 Key: ${normalized.r2StorageKey}`);
-          console.log(`   📄 NIT Docs: ${normalized.nitDocuments?.length || 0} | 📦 BOQ ZIP: ${normalized.boqZipUrl ? 'Secured (' + (normalized.zipFileSizeKb || '?') + ' KB)' : 'None'} | 📊 Status: ${normalized.pdfFetchStatus}`);
-        } catch (saveErr) {
-          console.error(`❌ Error saving tender ${tender.sourceTenderId}: ${saveErr.message}`);
+          if (syncJob) {
+            await SyncJob.findByIdAndUpdate(syncJob._id, {
+              itemsProcessed: (checkpoint?.totalProcessed || 0) + savedCount + skippedCount,
+              newTendersFound: (checkpoint?.totalProcessed || 0) + savedCount,
+              pdfsDownloaded: pdfCount,
+              missingPdfCount
+            }).catch(() => {});
+          }
+        },
+        shouldSkipTender: async (sourceTenderId) => {
+          try {
+            const existing = await Tender.findOne({
+              sourcePortal: 'JK_TENDERS',
+              sourceTenderId
+            }).select('pdfFetchStatus').lean();
+
+            if (existing && existing.pdfFetchStatus === 'COMPLETED') {
+              skippedCount++;
+              return true;
+            }
+            return false;
+          } catch (e) {
+            return false;
+          }
         }
+      }, async (batch) => {
+        for (const tender of batch) {
+          try {
+            const normalized = adapter.normalize(tender);
+
+            const existing = await Tender.findOne({
+              sourcePortal: normalized.sourcePortal,
+              sourceTenderId: normalized.sourceTenderId
+            }).lean();
+
+            if (existing) {
+              // Merge nitDocuments without duplicates
+              const existingNit = existing.nitDocuments || [];
+              const newNit = normalized.nitDocuments || [];
+              const mergedNit = [...existingNit];
+              for (const doc of newNit) {
+                if (!mergedNit.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
+                  mergedNit.push(doc);
+                }
+              }
+              normalized.nitDocuments = mergedNit;
+
+              // Merge pdfUrls without duplicates
+              const existingPdfs = existing.pdfUrls || [];
+              const newPdfs = normalized.pdfUrls || [];
+              normalized.pdfUrls = Array.from(new Set([...existingPdfs, ...newPdfs]));
+
+              // Merge workItemDocuments without duplicates
+              const existingWork = existing.workItemDocuments || [];
+              const newWork = normalized.workItemDocuments || [];
+              const mergedWork = [...existingWork];
+              for (const doc of newWork) {
+                if (!mergedWork.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
+                  mergedWork.push(doc);
+                }
+              }
+              normalized.workItemDocuments = mergedWork;
+
+              if (!normalized.boqFileUrl && existing.boqFileUrl) {
+                normalized.boqFileUrl = existing.boqFileUrl;
+              }
+              if (!normalized.boqZipUrl && existing.boqZipUrl) {
+                normalized.boqZipUrl = existing.boqZipUrl;
+                normalized.zipFileName = existing.zipFileName;
+                normalized.zipFileSizeKb = existing.zipFileSizeKb;
+              }
+            }
+
+            await Tender.findOneAndUpdate(
+              { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
+              { $set: normalized },
+              { upsert: true, returnDocument: 'after' }
+            );
+
+            savedCount++;
+            if (normalized.pdfUrls && normalized.pdfUrls.length > 0) pdfCount += normalized.pdfUrls.length;
+            if (normalized.boqZipUrl || normalized.boqFileUrl) boqCount++;
+            if (normalized.pdfFetchStatus === 'PENDING') missingPdfCount++;
+
+            console.log(`✅ [Saved: ${savedCount} | Skipped: ${skippedCount}] ${normalized.sourceTenderId} (${normalized.departmentCode || 'GEN'})`);
+            console.log(`   📁 Key: ${normalized.r2StorageKey}`);
+            console.log(`   📄 NIT Docs: ${normalized.nitDocuments?.length || 0} | 📦 BOQ ZIP: ${normalized.boqZipUrl ? 'Secured (' + (normalized.zipFileSizeKb || '?') + ' KB)' : 'None'} | 📊 Status: ${normalized.pdfFetchStatus}`);
+          } catch (saveErr) {
+            console.error(`❌ Error saving tender ${tender.sourceTenderId}: ${saveErr.message}`);
+          }
+        }
+      });
+
+      const durationMs = Date.now() - startTime;
+      clearCheckpoint(); // Clean finish
+      isCrawlComplete = true;
+
+      if (syncJob) {
+        await SyncJob.findByIdAndUpdate(syncJob._id, {
+          status: 'completed',
+          itemsProcessed: (checkpoint?.totalProcessed || 0) + savedCount + skippedCount,
+          newTendersFound: (checkpoint?.totalProcessed || 0) + savedCount,
+          pdfsDownloaded: pdfCount,
+          missingPdfCount,
+          durationMs
+        }).catch(() => {});
       }
-    });
 
-    const durationMs = Date.now() - startTime;
-    clearCheckpoint(); // Clean finish
-
-    if (syncJob) {
-      await SyncJob.findByIdAndUpdate(syncJob._id, {
-        status: 'completed',
-        itemsProcessed: (checkpoint?.totalProcessed || 0) + savedCount + skippedCount,
-        newTendersFound: (checkpoint?.totalProcessed || 0) + savedCount,
-        pdfsDownloaded: pdfCount,
+      // Send Telegram Crawl Completed Notification
+      await telegramService.sendCrawlCompleted({
+        mode: 'FULL',
+        savedCount,
+        skippedCount,
+        pdfCount,
+        boqCount,
         missingPdfCount,
         durationMs
-      }).catch(() => {});
+      });
+
+      console.log(`\n======================================================================`);
+      console.log(`🎉 [COMMAND 1] FULL ACTIVE TENDERS CRAWL FINISHED`);
+      console.log(`======================================================================`);
+      console.log(`📊 Tenders Newly Saved / Updated: ${savedCount}`);
+      console.log(`⏩ Tenders Skipped (Already Completed): ${skippedCount}`);
+      console.log(`📄 PDFs Uploaded to R2: ${pdfCount}`);
+      console.log(`📦 BOQ Archives Uploaded to R2: ${boqCount}`);
+      console.log(`⏱️ Duration: ${Math.round(durationMs / 1000)}s`);
+      console.log(`======================================================================\n`);
+
+      await closeDB();
+      process.exit(0);
+
+    } catch (err) {
+      consecutiveErrors++;
+      const waitSeconds = Math.min(consecutiveErrors * 5, 30);
+      console.error(`\n⚠️ [AUTO-HEALING] Error encountered: ${err.message}`);
+
+      if (lastCheckpointState) {
+        saveCheckpoint(lastCheckpointState);
+        console.log(`💾 Checkpoint preserved at .crawl_checkpoint.json`);
+      }
+
+      console.log(`🔄 [AUTO-HEALING] Cooling down for ${waitSeconds}s and automatically resuming in the cloud... (Attempt ${consecutiveErrors}/${MAX_RETRY_ATTEMPTS})\n`);
+
+      // Send Telegram self-healing update
+      await telegramService.sendMessage(
+        `🛠️ <b>TenderHub Auto-Healing Engine</b>\n\n` +
+        `⚠️ <b>Transient Portal Error:</b> <code>${(err.message || 'Unknown error').slice(0, 150)}</code>\n` +
+        `🏛️ <b>At Org:</b> <code>${lastCheckpointState?.orgName || checkpoint?.orgName || 'N/A'}</code>\n` +
+        `💾 <b>Checkpoint:</b> Preserved safely.\n` +
+        `🔄 <b>Action:</b> Cooling down for ${waitSeconds}s and automatically resuming (Attempt ${consecutiveErrors}/${MAX_RETRY_ATTEMPTS})...`
+      ).catch(() => {});
+
+      if (syncJob) {
+        await SyncJob.findByIdAndUpdate(syncJob._id, {
+          status: 'retrying',
+          errorMessage: err.message
+        }).catch(() => {});
+      }
+
+      // Cool down before auto-resuming
+      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
     }
+  }
 
-    // Send Telegram Crawl Completed Notification
-    await telegramService.sendCrawlCompleted({
-      mode: 'FULL',
-      savedCount,
-      skippedCount,
-      pdfCount,
-      boqCount,
-      missingPdfCount,
-      durationMs
-    });
-
-    console.log(`\n======================================================================`);
-    console.log(`🎉 [COMMAND 1] FULL ACTIVE TENDERS CRAWL FINISHED`);
-    console.log(`======================================================================`);
-    console.log(`📊 Tenders Newly Saved / Updated: ${savedCount}`);
-    console.log(`⏩ Tenders Skipped (Already Completed): ${skippedCount}`);
-    console.log(`📄 PDFs Uploaded to R2: ${pdfCount}`);
-    console.log(`📦 BOQ Archives Uploaded to R2: ${boqCount}`);
-    console.log(`⏱️ Duration: ${Math.round(durationMs / 1000)}s`);
-    console.log(`======================================================================\n`);
-
-    await closeDB();
-    process.exit(0);
-  } catch (err) {
-    const durationMs = Date.now() - startTime;
-    console.error(`❌ Full crawl failed or interrupted:`, err.message);
-    if (lastCheckpointState) {
-      saveCheckpoint(lastCheckpointState);
-      console.log(`💾 Checkpoint saved at .crawl_checkpoint.json. You can resume anytime by running: npm run scrape:all`);
-    }
+  // If MAX_RETRY_ATTEMPTS exceeded
+  if (!isCrawlComplete) {
+    console.error(`❌ Maximum retry attempts (${MAX_RETRY_ATTEMPTS}) reached. Exiting.`);
     await telegramService.sendCrawlError({
       mode: 'FULL',
-      error: err.message,
-      checkpointSaved: Boolean(lastCheckpointState),
+      error: `Maximum retry attempts (${MAX_RETRY_ATTEMPTS}) exceeded.`,
+      checkpointSaved: true,
       lastOrg: lastCheckpointState?.orgName || ''
     });
-    if (syncJob) {
-      await SyncJob.findByIdAndUpdate(syncJob._id, {
-        status: 'failed',
-        durationMs,
-        errorMessage: err.message
-      }).catch(() => {});
-    }
     await closeDB().catch(() => {});
     process.exit(1);
   }
