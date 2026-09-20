@@ -66,7 +66,14 @@ export const adminApi = {
     const query = new URLSearchParams(params).toString();
     return request(`/sync/history?${query}`);
   },
-  triggerManualSync: () => request('/sync/trigger', { method: 'POST' }),
+  getLiveSyncStatus: () => request('/sync/live-status'),
+  triggerManualSync: (options = {}) => 
+    request('/sync/trigger', { 
+      method: 'POST', 
+      body: JSON.stringify(options) 
+    }),
+  stopActiveSync: () => request('/sync/stop', { method: 'POST' }),
+  resetCrawlCheckpoint: () => request('/sync/checkpoint/reset', { method: 'POST' }),
   triggerMissingPdfRecovery: () => request('/sync/retry-missing-pdfs', { method: 'POST' }),
   updateScheduleConfig: (isAutomatedSyncEnabled) => 
     request('/sync/schedule-config', {
@@ -74,4 +81,85 @@ export const adminApi = {
       body: JSON.stringify({ isAutomatedSyncEnabled }),
     }),
   purgeExpiredArchive: () => request('/maintenance/purge-archive', { method: 'POST' }),
+  purgeExpiredTenders: () => request('/maintenance/purge-expired', { method: 'POST' }),
+  getBackupStatus: () => request('/backup/status'),
+  triggerBackup: (type = 'database') => 
+    request('/backup/trigger', {
+      method: 'POST',
+      body: JSON.stringify({ type }),
+    }),
+  syncMirror: () => request('/backup/sync-mirror', { method: 'POST' }),
+  downloadBackupFile: async (fileName) => {
+    const adminKey = getStoredAdminKey();
+    const response = await fetch(`${BASE_URL}/backup/download/${encodeURIComponent(fileName)}`, {
+      headers: { 'x-admin-key': adminKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download backup archive: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  },
+  downloadDisasterRecoveryGuide: async () => {
+    const adminKey = getStoredAdminKey();
+    const response = await fetch(`${BASE_URL}/backup/disaster-recovery-guide`, {
+      headers: { 'x-admin-key': adminKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download disaster recovery manual: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'TenderHub_Disaster_Recovery_and_Backup_Manual.pdf';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  },
+  downloadDeploymentGuide: async () => {
+    const adminKey = getStoredAdminKey();
+    const response = await fetch(`${BASE_URL}/backup/deployment-guide`, {
+      headers: { 'x-admin-key': adminKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download deployment manual: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'TenderHub_Production_Deployment_Manual.pdf';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  },
+  downloadFutureConfigGuide: async () => {
+    const adminKey = getStoredAdminKey();
+    const response = await fetch(`${BASE_URL}/backup/future-config-guide`, {
+      headers: { 'x-admin-key': adminKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download future configuration manual: HTTP ${response.status}`);
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'TenderHub_Future_Configurations_Render_and_Failover.pdf';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  },
 };
+

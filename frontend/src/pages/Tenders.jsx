@@ -491,9 +491,10 @@ export default function Tenders() {
                   }}
                   className="flex-1 sm:flex-none bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-800 dark:text-white hover:border-dalBlue dark:hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-dalBlue/30 focus:border-dalBlue cursor-pointer shadow-xs transition-all truncate"
                 >
-                  <option value="arrival">Arrival Date (Newest First)</option>
-                  <option value="closingAsc">Deadline (Soonest First)</option>
-                  <option value="closingDesc">Deadline (Furthest First)</option>
+                  <option value="arrival">Latest Published (Newest First)</option>
+                  <option value="publishedAsc">Oldest Published First</option>
+                  <option value="closingAsc">Closing Deadline (Soonest First)</option>
+                  <option value="closingDesc">Closing Deadline (Furthest First)</option>
                   <option value="valueDesc">Estimated Value (High to Low)</option>
                   <option value="valueAsc">Estimated Value (Low to High)</option>
                 </select>

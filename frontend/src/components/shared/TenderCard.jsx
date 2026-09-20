@@ -4,9 +4,9 @@
  * clear submission timeline, financial metrics, and district location tag.
  */
 import { useNavigate } from 'react-router-dom';
-import { Clock, MapPin, Heart, ArrowRight, FileSpreadsheet, Building2, Calendar } from 'lucide-react';
+import { Clock, MapPin, Heart, ArrowRight, FileSpreadsheet, Building2, Calendar, FileText } from 'lucide-react';
 
-import { formatCurrencyINR, formatDateDisplay, extractFamousLocation } from '@/utils/formatters';
+import { formatCurrencyINR, formatDateDisplay, formatDateTimeDisplay, extractFamousLocation } from '@/utils/formatters';
 import { useBookmarkStore } from '@/store/useBookmarkStore';
 
 export function TenderCard({ tender }) {
@@ -72,15 +72,30 @@ export function TenderCard({ tender }) {
           {tender.title?.replace(/[[\]]/g, '') || 'Tender Notice'}
         </h3>
 
-        {subDept && (
-          <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mb-2 sm:mb-3 truncate font-normal">
-            Division: {subDept}
-          </p>
-        )}
+        {/* Sub-header: Division & Published Time */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mb-2 sm:mb-2.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
+          {subDept && (
+            <span className="truncate max-w-[260px] font-normal">
+              Division: <span className="font-medium text-slate-700 dark:text-slate-300">{subDept}</span>
+            </span>
+          )}
+          {subDept && (tender.publishedDate || tender.createdAt) && (
+            <span className="text-slate-300 dark:text-slate-600 hidden xs:inline">•</span>
+          )}
+          {(tender.publishedDate || tender.createdAt) && (
+            <span className="inline-flex items-center gap-1 font-normal text-slate-600 dark:text-slate-300 shrink-0">
+              <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>Published:</span>
+              <strong className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                {formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}
+              </strong>
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Middle Financials & Timeline Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 py-2.5 sm:py-3 my-2.5 sm:my-3 border-y border-slate-100 dark:border-slate-700/60 bg-slate-50/70 dark:bg-slate-900/40 rounded-xl px-3 sm:px-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 py-2.5 sm:py-3 my-2.5 sm:my-3 border-y border-slate-100 dark:border-slate-700/60 bg-slate-50/70 dark:bg-slate-900/40 rounded-xl px-3 sm:px-3.5">
         <div>
           <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
             Estimated Value
@@ -106,6 +121,16 @@ export function TenderCard({ tender }) {
 
         <div>
           <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
+            Published Time
+          </span>
+          <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate" title={formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}>
+            <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span className="truncate">{formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}</span>
+          </span>
+        </div>
+
+        <div>
+          <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
             Closing Date
           </span>
           <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate">
@@ -114,7 +139,7 @@ export function TenderCard({ tender }) {
           </span>
         </div>
 
-        <div>
+        <div className="col-span-2 sm:col-span-1">
           <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
             Status
           </span>
@@ -153,10 +178,19 @@ export function TenderCard({ tender }) {
             {tender.productCategory || tender.tenderCategory || 'Works'}
           </span>
 
-          {/* BOQ Schedule */}
-          {tender.coversInfo?.some((c) => c.documentType === '.xls') && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/50 text-dalBlue dark:text-blue-300 text-[10px] font-mono font-semibold rounded border border-blue-200 dark:border-blue-800">
-              <FileSpreadsheet className="w-3 h-3 shrink-0" /> BOQ
+          {/* Multiple Notices Tag */}
+          {((tender.nitDocuments?.length > 1) || (tender.pdfUrls?.length > 1)) && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-50 dark:bg-red-950/40 text-chinarRed dark:text-red-300 text-[10px] font-mono font-semibold rounded border border-red-200 dark:border-red-800" title={`${tender.nitDocuments?.length || tender.pdfUrls?.length} Official Notices Available`}>
+              <FileText className="w-3 h-3 shrink-0" />
+              <span>{tender.nitDocuments?.length || tender.pdfUrls?.length} Notices</span>
+            </span>
+          )}
+
+          {/* BOQ / Work Item Documents Badge */}
+          {(tender.boqZipUrl || tender.boqFileUrl || tender.workItemDocuments?.length > 0 || tender.coversInfo?.some((c) => c.documentType === '.xls')) && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono font-semibold rounded border border-emerald-200 dark:border-emerald-800" title="BOQ & Work Documents Archive">
+              <FileSpreadsheet className="w-3 h-3 shrink-0" />
+              <span>{tender.boqZipUrl ? 'BOQ ZIP' : (tender.workItemDocuments?.length > 1 ? `${tender.workItemDocuments.length} Work Docs` : 'BOQ')}</span>
             </span>
           )}
         </div>

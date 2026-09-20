@@ -1,0 +1,18 @@
+{
+  "name": "tenderhub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TenderHub - Jammu & Kashmir Tenders Intelligence Engine Monorepo",
+  "scripts": {
+    "manual:disaster": "npm --prefix backend run manual:disaster",
+    "manual:deployment": "npm --prefix backend run manual:deployment",
+    "manuals:all": "npm --prefix backend run manuals:all",
+    "backup:db": "npm --prefix backend run backup:db",
+    "sync:mirror": "npm --prefix backend run sync:mirror",
+    "backup:full": "npm --prefix backend run backup:full",
+    "restore:db": "npm --prefix backend run restore:db",
+    "restore:full": "npm --prefix backend run restore:full",
+    "scrape:tenders": "npm --prefix backend run scrape:tenders",
+    "scrape:complete": "npm --prefix backend run scrape:complete"
+  }
+}

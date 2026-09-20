@@ -143,18 +143,21 @@ export const getTenders = async (req, res, next) => {
       }
     }
 
-    // 6. Sort Configuration: Default to Most Recent Arrival Date first
-    let sortConfig = { publishedDate: -1, createdAt: -1 };
+    // 6. Sort Configuration: Default to Most Recent Published Date First
+    let sortConfig = { publishedDate: -1, createdAt: -1, _id: -1 };
     if (sortBy === 'closingAsc') {
-      sortConfig = { closingDate: 1 };
+      sortConfig = { closingDate: 1, publishedDate: -1 };
     } else if (sortBy === 'closingDesc') {
-      sortConfig = { closingDate: -1 };
+      sortConfig = { closingDate: -1, publishedDate: -1 };
     } else if (sortBy === 'valueDesc') {
-      sortConfig = { estimatedValue: -1 };
+      sortConfig = { estimatedValue: -1, publishedDate: -1 };
     } else if (sortBy === 'valueAsc') {
-      sortConfig = { estimatedValue: 1 };
-    } else if (sortBy === 'arrival') {
-      sortConfig = { publishedDate: -1, createdAt: -1 };
+      sortConfig = { estimatedValue: 1, publishedDate: -1 };
+    } else if (sortBy === 'publishedAsc') {
+      sortConfig = { publishedDate: 1, createdAt: 1, _id: 1 };
+    } else {
+      // Default: 'arrival', 'publishedDesc', 'latest', or undefined -> Newest Published First
+      sortConfig = { publishedDate: -1, createdAt: -1, _id: -1 };
     }
 
     // 7. Execute Database Query
@@ -336,6 +339,41 @@ export const getTenderStats = async (req, res, next) => {
     });
   } catch (error) {
     console.error("Error calculating tender stats:", error);
+    next(error);
+  }
+};
+
+/**
+ * Streams the tender's ZIP archive from R2 storage via the backend.
+ * Bypasses direct browser CORS limitations on Cloudflare R2 pub-* domains.
+ * 
+ * @route GET /api/v1/tenders/:id/zip
+ */
+export const downloadTenderZip = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const tender = await Tender.findById(id).lean();
+    if (!tender) {
+      return res.status(404).json({ message: 'Tender not found' });
+    }
+
+    const zipUrl = tender.boqZipUrl || (tender.boqFileUrl && tender.boqFileUrl.toLowerCase().endsWith('.zip') ? tender.boqFileUrl : null);
+    if (!zipUrl) {
+      return res.status(404).json({ message: 'No ZIP archive found for this tender' });
+    }
+
+    const response = await fetch(zipUrl);
+    if (!response.ok) {
+      return res.status(502).json({ message: 'Failed to retrieve archive from storage' });
+    }
+
+    const fileName = tender.zipFileName || `Tender_Packet_${tender.sourceTenderId || id}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+    const arrayBuffer = await response.arrayBuffer();
+    return res.send(Buffer.from(arrayBuffer));
+  } catch (error) {
     next(error);
   }
 };

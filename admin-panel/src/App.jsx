@@ -19,6 +19,7 @@ import { DiagnosticView } from './components/DiagnosticView';
 import { IngestionView } from './components/IngestionView';
 import { ArchiveView } from './components/ArchiveView';
 import { LogsView } from './components/LogsView';
+import { BackupView } from './components/BackupView';
 
 function AdminAppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -110,6 +111,13 @@ function AdminAppContent() {
       badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
     },
     { id: 'archive', label: 'Archive & Purge', icon: FolderArchive },
+    { 
+      id: 'backup', 
+      label: 'Backup & Recovery', 
+      icon: ShieldCheck,
+      badge: '02:00 AM',
+      badgeColor: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+    },
     { id: 'logs', label: 'System Logs Stream', icon: FileText },
   ];
 
@@ -184,6 +192,10 @@ function AdminAppContent() {
             overview={overview} 
             onRefresh={refreshAllData} 
           />
+        )}
+
+        {activeTab === 'backup' && (
+          <BackupView />
         )}
 
         {activeTab === 'logs' && (

@@ -15,6 +15,8 @@ import CronConfig from '../models/CronConfig.js';
 import Tender from '../models/Tender.js';
 import SystemLog from '../models/SystemLog.js';
 import { tenderQueue } from '../workers/queue.js';
+import { retentionService } from './retention.service.js';
+import { backupService } from './backup.service.js';
 
 const logger = pino();
 
@@ -44,10 +46,24 @@ export class SchedulerService {
     // 6:30 PM (18:30)
     this.scheduleSyncSlot('30 18 * * *', '06:30 PM');
 
-    // 3. Automated 30-Day Archive Retention Purge (Runs daily at 02:00 AM)
+    // 3. Automated Expired Tenders Purge & Daily DB Backup (Runs daily at 02:00 AM)
     cron.schedule('0 2 * * *', async () => {
-      logger.info('[Scheduler] Running scheduled 30-day archive retention purge...');
+      logger.info('[Scheduler] Running scheduled expired tenders purge from MongoDB & Cloudflare R2...');
+      await retentionService.purgeExpiredTenders('CRON_SCHEDULE').catch(err => {
+        logger.error(`[Scheduler] Purge failed: ${err.message}`);
+      });
       await this.purgeExpiredArchivedTenders('CRON_SCHEDULE');
+      
+      logger.info('[Scheduler] Running scheduled nightly database backup & secondary Cloudflare mirror...');
+      await backupService.createDatabaseBackup().catch(err => {
+        logger.error(`[Scheduler] Nightly database backup failed: ${err.message}`);
+      });
+
+      // Prune local backups older than 14 days to keep storage optimal
+      const pruneResult = backupService.pruneOldBackups(14);
+      if (pruneResult.prunedCount > 0) {
+        logger.info(`[Scheduler] Pruned ${pruneResult.prunedCount} expired local backup(s).`);
+      }
     }, {
       timezone: 'Asia/Kolkata'
     });

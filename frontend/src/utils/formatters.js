@@ -63,6 +63,56 @@ export const formatDateDisplay = (dateValue) => {
   });
 };
 
+/**
+ * Formats ISO date string or MongoDB date objects into readable Date and Time (e.g. "18 Sep 2026, 06:00 PM").
+ * 
+ * @param {string|Date|Object} dateValue - Date object or ISO string.
+ * @returns {string} Formatted readable date with time.
+ */
+export const formatDateTimeDisplay = (dateValue) => {
+  if (!dateValue || dateValue === 'NA' || dateValue === 'N/A') return 'N/A';
+  
+  const dateStr = typeof dateValue === 'object' && dateValue?.$date ? dateValue.$date : dateValue;
+  const parsed = new Date(dateStr);
+  
+  if (isNaN(parsed.getTime())) return 'N/A';
+  
+  const formatted = parsed.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+
+  return formatted.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+};
+
+/**
+ * Formats time only (e.g. "06:00 PM").
+ * 
+ * @param {string|Date|Object} dateValue - Date object or ISO string.
+ * @returns {string} Formatted time string.
+ */
+export const formatTimeDisplay = (dateValue) => {
+  if (!dateValue || dateValue === 'NA' || dateValue === 'N/A') return '';
+  
+  const dateStr = typeof dateValue === 'object' && dateValue?.$date ? dateValue.$date : dateValue;
+  const parsed = new Date(dateStr);
+  
+  if (isNaN(parsed.getTime())) return '';
+  
+  const formatted = parsed.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  });
+
+  return formatted.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+};
+
+
 // Known famous districts and prominent towns in J&K (ordered specifically)
 const FAMOUS_DISTRICTS_TOWNS = [
   'Baramulla', 'Bandipora', 'Anantnag', 'Kulgam', 'Pulwama',

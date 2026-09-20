@@ -135,3 +135,25 @@ If you prefer to configure each service manually in the Render UI, follow these 
    - The scraper worker (`backend/src/workers/index.js`) can be run as a separate Render **Background Worker** or as a **Cron Job** (e.g., run every 6 hours: `0 */6 * * *` with command `node src/workers/index.js`).
 3. **Log Monitoring**:
    - You can view real-time backend logs under the **Logs** tab of `tenderhub-api` on the Render Dashboard.
+
+---
+
+## Generating Official Architecture & Disaster Recovery Manuals (PDF)
+
+TenderHub includes automated Playwright-based PDF document generators for offline operations and infrastructure audits:
+
+1. **Disaster Recovery & High-Availability Failover Manual** (4 pages):
+   ```bash
+   npm run manual:disaster
+   ```
+2. **Production Deployment & Cloud Topology Manual** (2 pages):
+   ```bash
+   npm run manual:deployment
+   ```
+3. **Generate Both Manuals Simultaneously**:
+   ```bash
+   npm run manuals:all
+   ```
+
+> *Note: These commands can be run either from the project root or inside the `backend/` folder. Generated PDFs are placed into `docs/` and synced to `backend/backups/`.*
+

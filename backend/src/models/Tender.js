@@ -7,6 +7,8 @@ const tenderSchema = new mongoose.Schema({
   detailsUrl: { type: String },
 
   // --- Basic Details ---
+  departmentCode: { type: String, index: true }, // e.g. APD, PDD, PWD
+  departmentName: { type: String, index: true }, // e.g. Agriculture Production Department
   organisationChain: { type: String, index: true }, // Filter key for Home Page
   tenderReferenceNumber: { type: String },
   withdrawalAllowed: { type: String },
@@ -67,6 +69,7 @@ const tenderSchema = new mongoose.Schema({
   bidOpeningPlace: { type: String },
   shouldAllowNDATender: { type: String },
   allowPreferentialBidder: { type: String },
+  tendererClass: { type: String },
 
   // --- Critical Dates ---
   publishedDate: { type: Date },
@@ -103,6 +106,17 @@ const tenderSchema = new mongoose.Schema({
     fileUrl: { type: String } // R2 URL
   }],
   pdfUrls: [{ type: String }], // Consolidated array for quick frontend linking
+  boqFileUrl: { type: String }, // Backwards compatibility / direct file URL
+  boqZipUrl: { type: String }, // Direct Cloudflare R2 URL to the uploaded .zip archive
+  zipFileName: { type: String }, // Original .zip filename
+  zipFileSizeKb: { type: Number }, // Size of .zip file in KB
+  r2StorageKey: { type: String, index: true }, // Composite folder key: {departmentCode}/{sourceTenderId}_{publishedDate}
+  boqFetchStatus: { 
+    type: String, 
+    enum: ['COMPLETED', 'PENDING', 'NOT_AVAILABLE', 'FAILED'], 
+    default: 'PENDING',
+    index: true 
+  },
 
   // --- Tender Inviting Authority ---
   invitingAuthorityName: { type: String },
@@ -114,8 +128,10 @@ const tenderSchema = new mongoose.Schema({
 
 // Indexes for fast filtering, deduplication, and retention management
 tenderSchema.index({ sourcePortal: 1, sourceTenderId: 1 }, { unique: true });
+tenderSchema.index({ departmentCode: 1, closingDate: 1 });
 tenderSchema.index({ organisationChain: 1, closingDate: 1 });
 tenderSchema.index({ status: 1, closingDate: 1 });
 tenderSchema.index({ pdfFetchStatus: 1, closingDate: 1 });
+tenderSchema.index({ publishedDate: -1, createdAt: -1 });
 
 export default mongoose.model('Tender', tenderSchema);

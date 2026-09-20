@@ -80,7 +80,7 @@ export function DiagnosticView({ diagnostics, onRefresh }) {
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> BullMQ Scraper Ready
             </span>
             <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> CapSolver Active
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Auto-Captcha Active
             </span>
           </div>
         </div>

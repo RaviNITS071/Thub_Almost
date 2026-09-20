@@ -30,16 +30,54 @@ async function saveDetailedTendersToDatabase(pageData, adapter) {
       const normalized = adapter.normalize(raw);
       const updateFields = { ...normalized };
 
-      // Safeguard: If current scrape has no PDFs, check if existing tender in DB already has them
-      if (!normalized.pdfUrls || normalized.pdfUrls.length === 0) {
-        const existingTender = await Tender.findOne(
-          { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
-          { pdfUrls: 1, nitDocuments: 1, pdfFetchStatus: 1 }
-        );
-        if (existingTender && existingTender.pdfUrls && existingTender.pdfUrls.length > 0) {
-          delete updateFields.pdfUrls;
-          delete updateFields.nitDocuments;
+      const existingTender = await Tender.findOne(
+        { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
+        { pdfUrls: 1, nitDocuments: 1, pdfFetchStatus: 1, boqFileUrl: 1, workItemDocuments: 1, boqFetchStatus: 1 }
+      );
+
+      if (existingTender) {
+        // Merge NIT documents
+        if (!normalized.nitDocuments || normalized.nitDocuments.length === 0) {
+          if (existingTender.nitDocuments?.length > 0) {
+            updateFields.nitDocuments = existingTender.nitDocuments;
+            updateFields.pdfUrls = existingTender.pdfUrls || [];
+            updateFields.pdfFetchStatus = existingTender.pdfFetchStatus || 'COMPLETED';
+          }
+        } else if (existingTender.nitDocuments?.length > 0) {
+          const existingUrls = new Set(existingTender.nitDocuments.map(d => d.fileUrl));
+          const combined = [...existingTender.nitDocuments];
+          for (const doc of normalized.nitDocuments) {
+            if (!existingUrls.has(doc.fileUrl)) {
+              combined.push(doc);
+              existingUrls.add(doc.fileUrl);
+            }
+          }
+          updateFields.nitDocuments = combined;
+          updateFields.pdfUrls = [...new Set([...(existingTender.pdfUrls || []), ...(normalized.pdfUrls || [])])];
           updateFields.pdfFetchStatus = 'COMPLETED';
+        }
+
+        // Merge Work Item documents (extracted from zip)
+        if (!normalized.workItemDocuments || normalized.workItemDocuments.length === 0) {
+          if (existingTender.workItemDocuments?.length > 0) {
+            updateFields.workItemDocuments = existingTender.workItemDocuments;
+            if (existingTender.boqFileUrl) updateFields.boqFileUrl = existingTender.boqFileUrl;
+            updateFields.boqFetchStatus = existingTender.boqFetchStatus || 'COMPLETED';
+          }
+        } else if (existingTender.workItemDocuments?.length > 0) {
+          const existingUrls = new Set(existingTender.workItemDocuments.map(d => d.fileUrl));
+          const combined = [...existingTender.workItemDocuments];
+          for (const doc of normalized.workItemDocuments) {
+            if (!existingUrls.has(doc.fileUrl)) {
+              combined.push(doc);
+              existingUrls.add(doc.fileUrl);
+            }
+          }
+          updateFields.workItemDocuments = combined;
+          if (!updateFields.boqFileUrl && existingTender.boqFileUrl) {
+            updateFields.boqFileUrl = existingTender.boqFileUrl;
+          }
+          updateFields.boqFetchStatus = 'COMPLETED';
         }
       }
 

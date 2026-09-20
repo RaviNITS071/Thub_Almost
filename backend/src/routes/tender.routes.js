@@ -3,6 +3,7 @@ import {
   getTenders,
   getTenderStats, // Imported the newly created stats controller
   getTenderById,
+  downloadTenderZip,
   triggerAiAnalysis
 } from '../controllers/tender.controller.js';
 
@@ -23,6 +24,12 @@ router.get('/', getTenders);
  * "stats" as a document ID and pass it to getTenderById, causing a database error.
  */
 router.get('/stats', getTenderStats);
+
+/**
+ * @route GET /api/tenders/:id/zip
+ * Stream the ZIP archive directly with CORS headers to avoid client browser CORS blocks.
+ */
+router.get('/:id/zip', downloadTenderZip);
 
 /**
  * @route GET /api/tenders/:id
