@@ -1173,6 +1173,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         orgLink.click({ noWaitAfter: true })
       ]);
       await this.humanDelay(page, 500, 800);
+    } else if (state !== 'TENDER_LIST') {
       // If state is still unknown, navigate cleanly from homepage
       logger.warn(`⚠️ Navigation state unclear. Re-navigating to "${orgName}" from homepage...`);
       try {
@@ -1193,10 +1194,10 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         orgMenuLink.click({ noWaitAfter: true })
       ]);
       await this.humanDelay(page, 500, 800);
-      const orgLink = page.locator(`a:has-text("${orgName}")`).first();
+      const reenteredOrgLink = page.locator(`a:has-text("${orgName}")`).first();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
-        orgLink.click({ noWaitAfter: true })
+        reenteredOrgLink.click({ noWaitAfter: true })
       ]);
       await this.humanDelay(page, 500, 800);
     }
