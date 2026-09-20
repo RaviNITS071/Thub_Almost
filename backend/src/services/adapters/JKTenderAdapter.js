@@ -440,44 +440,55 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
             logger.info(`👉 [${currentCount + 1}/${maxTenders}] Opening Tender: ${tenderSummary.sourceTenderId || tenderSummary.title.substring(0, 40)}`);
 
-            // Click tender title link (in td 5) to open Tender Details in the SAME tab
-            let tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: tenderSummary.sourceTenderId }).locator("td:nth-child(5) a, a").first();
-            const exists = await tenderLink.count().catch(() => 0);
-            if (exists === 0) {
-              tenderLink = page.locator("table.list_table tr:has(td:nth-child(5) a)").nth(t).locator("td:nth-child(5) a").first();
+            try {
+              // Click tender title link (in td 5) to open Tender Details in the SAME tab
+              let tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: tenderSummary.sourceTenderId }).locator("td:nth-child(5) a, a").first();
+              const exists = await tenderLink.count().catch(() => 0);
+              if (exists === 0) {
+                tenderLink = page.locator("table.list_table tr:has(td:nth-child(5) a)").nth(t).locator("td:nth-child(5) a").first();
+              }
+              await Promise.all([
+                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
+                tenderLink.click({ noWaitAfter: true, timeout: 20000 }).catch(() => tenderLink.click({ force: true, noWaitAfter: true }))
+              ]);
+              await this.humanDelay(page, 400, 650);
+
+              // Scrape tender details & download documents directly in page
+              const { processedItem, pdfCount } = await this.scrapeTenderDetailAndPdfInPage(page, tenderSummary, org.orgName);
+              if (pdfCount > 0) pdfCountTotal += pdfCount;
+              else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
+
+              currentCount++;
+
+              if (onPageScraped) {
+                await onPageScraped([processedItem]);
+              }
+
+              if (filters.onCheckpoint) {
+                await filters.onCheckpoint({
+                  orgIndex: o,
+                  orgName: org.orgName,
+                  orgPageNum,
+                  lastTenderId: tenderSummary.sourceTenderId,
+                  totalProcessed: currentCount,
+                  status: 'IN_PROGRESS'
+                });
+              }
+
+              // Safely return to the Organisation's Tender List
+              logger.info(`🔙 Returning from Tender Details to Tender List...`);
+              await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
+              await this.humanDelay(page, 400, 650);
+            } catch (tenderErr) {
+              logger.error(`⚠️ Transient error on tender ${tenderSummary.sourceTenderId || 'unknown'}: ${tenderErr.message}`);
+              // Recover page back to Organisation's Tender List so next tender can continue
+              try {
+                await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
+                await this.humanDelay(page, 500, 800);
+              } catch (recoverErr) {
+                logger.warn(`Could not immediately recover to list: ${recoverErr.message}`);
+              }
             }
-            await Promise.all([
-              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
-              tenderLink.click({ noWaitAfter: true, timeout: 20000 }).catch(() => tenderLink.click({ force: true, noWaitAfter: true }))
-            ]);
-            await this.humanDelay(page, 400, 650);
-
-            // Scrape tender details & download documents directly in page
-            const { processedItem, pdfCount } = await this.scrapeTenderDetailAndPdfInPage(page, tenderSummary, org.orgName);
-            if (pdfCount > 0) pdfCountTotal += pdfCount;
-            else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
-
-            currentCount++;
-
-            if (onPageScraped) {
-              await onPageScraped([processedItem]);
-            }
-
-            if (filters.onCheckpoint) {
-              await filters.onCheckpoint({
-                orgIndex: o,
-                orgName: org.orgName,
-                orgPageNum,
-                lastTenderId: tenderSummary.sourceTenderId,
-                totalProcessed: currentCount,
-                status: 'IN_PROGRESS'
-              });
-            }
-
-            // Safely return to the Organisation's Tender List
-            logger.info(`🔙 Returning from Tender Details to Tender List...`);
-            await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
-            await this.humanDelay(page, 400, 650);
           }
 
           // Pagination inside this organisation
@@ -1162,10 +1173,19 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         orgLink.click({ noWaitAfter: true })
       ]);
       await this.humanDelay(page, 500, 800);
-    } else if (state !== 'TENDER_LIST') {
       // If state is still unknown, navigate cleanly from homepage
       logger.warn(`⚠️ Navigation state unclear. Re-navigating to "${orgName}" from homepage...`);
-      await page.goto(`${this.baseUrl}/nicgep/app`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      try {
+        await page.goto(`${this.baseUrl}/nicgep/app`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      } catch (navErr) {
+        if (navErr.message.includes('interrupted') || navErr.message.includes('Navigation to')) {
+          logger.warn(`page.goto was interrupted by in-flight portal navigation, waiting for load state: ${navErr.message}`);
+          await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+          await this.humanDelay(page, 500, 1000);
+        } else {
+          throw navErr;
+        }
+      }
       await this.humanDelay(page, 500, 800);
       const orgMenuLink = page.locator("a:has-text('Tenders by Organisation'), a#DirectLink_0").first();
       await Promise.all([
