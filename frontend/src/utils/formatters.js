@@ -51,37 +51,92 @@ export const formatCurrencyINR = (amount) => {
 export const formatDateDisplay = (dateValue) => {
   if (!dateValue || dateValue === 'NA' || dateValue === 'N/A') return 'N/A';
   
-  const dateStr = typeof dateValue === 'object' && dateValue.$date ? dateValue.$date : dateValue;
+  if (typeof dateValue === 'string') {
+    const trimmed = dateValue.trim();
+    const m = trimmed.match(/^(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})/i);
+    if (m) {
+      const day = parseInt(m[1], 10);
+      const monthNames = {
+        '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+        '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
+        jan: 'Jan', feb: 'Feb', mar: 'Mar', apr: 'Apr', may: 'May', jun: 'Jun',
+        jul: 'Jul', aug: 'Aug', sep: 'Sep', oct: 'Oct', nov: 'Nov', dec: 'Dec'
+      };
+      const month = monthNames[m[2].toLowerCase()] || m[2];
+      const year = m[3];
+      return `${day} ${month} ${year}`;
+    }
+  }
+
+  const dateStr = typeof dateValue === 'object' && dateValue?.$date ? dateValue.$date : dateValue;
   const parsed = new Date(dateStr);
   
   if (isNaN(parsed.getTime())) return 'N/A';
   
   return parsed.toLocaleDateString('en-IN', {
-    day: '2-digit',
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
     month: 'short',
     year: 'numeric'
   });
 };
 
 /**
- * Formats ISO date string or MongoDB date objects into readable Date and Time (e.g. "18 Sep 2026, 06:00 PM").
+ * Formats ISO date string, raw portal string ("18-Sep-2026 06:00 PM"), or MongoDB date objects
+ * into standard readable Date and Time (e.g. "18 Sep 2026, 6:00 PM", "14 Sep 2026, 2:00 PM").
+ * Always uses standard format without leading zero on hours (e.g. 4:15 PM, 10:00 AM).
  * 
- * @param {string|Date|Object} dateValue - Date object or ISO string.
- * @returns {string} Formatted readable date with time.
+ * @param {string|Date|Object} dateValue - Date object, ISO string, or raw portal string.
+ * @returns {string} Formatted readable date with time in Indian Standard Time.
  */
 export const formatDateTimeDisplay = (dateValue) => {
   if (!dateValue || dateValue === 'NA' || dateValue === 'N/A') return 'N/A';
   
+  // Directly format raw portal strings like "18-Sep-2026 06:00 PM"
+  if (typeof dateValue === 'string') {
+    const trimmed = dateValue.trim();
+    const portalMatch = trimmed.match(/^(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+    if (portalMatch) {
+      const day = parseInt(portalMatch[1], 10);
+      const month = portalMatch[2];
+      const year = portalMatch[3];
+      const monthNames = {
+        '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+        '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec',
+        jan: 'Jan', feb: 'Feb', mar: 'Mar', apr: 'Apr', may: 'May', jun: 'Jun',
+        jul: 'Jul', aug: 'Aug', sep: 'Sep', oct: 'Oct', nov: 'Nov', dec: 'Dec'
+      };
+      const cleanMonth = monthNames[month.toLowerCase()] || month;
+
+      let timePart = '';
+      if (portalMatch[4] && portalMatch[5]) {
+        let hour = parseInt(portalMatch[4], 10);
+        const min = portalMatch[5];
+        const ampm = portalMatch[7] ? portalMatch[7].toUpperCase() : null;
+        if (ampm) {
+          timePart = `, ${hour}:${min} ${ampm}`;
+        } else {
+          const period = hour >= 12 ? 'PM' : 'AM';
+          hour = hour % 12;
+          if (hour === 0) hour = 12;
+          timePart = `, ${hour}:${min} ${period}`;
+        }
+      }
+      return `${day} ${cleanMonth} ${year}${timePart}`;
+    }
+  }
+
   const dateStr = typeof dateValue === 'object' && dateValue?.$date ? dateValue.$date : dateValue;
   const parsed = new Date(dateStr);
   
   if (isNaN(parsed.getTime())) return 'N/A';
   
   const formatted = parsed.toLocaleString('en-IN', {
-    day: '2-digit',
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
     month: 'short',
     year: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
     hour12: true
   });
@@ -90,21 +145,40 @@ export const formatDateTimeDisplay = (dateValue) => {
 };
 
 /**
- * Formats time only (e.g. "06:00 PM").
+ * Formats time only into standard format (e.g. "4:15 PM", "10:00 AM", "6:30 PM", "2:00 PM").
  * 
- * @param {string|Date|Object} dateValue - Date object or ISO string.
- * @returns {string} Formatted time string.
+ * @param {string|Date|Object} dateValue - Date object, ISO string, or raw string.
+ * @returns {string} Formatted time string in Indian Standard Time without leading zero on hours.
  */
 export const formatTimeDisplay = (dateValue) => {
   if (!dateValue || dateValue === 'NA' || dateValue === 'N/A') return '';
   
+  if (typeof dateValue === 'string') {
+    const trimmed = dateValue.trim();
+    const m = trimmed.match(/(?:^|\s)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if (m) {
+      let hours = parseInt(m[1], 10);
+      const minutes = m[2];
+      const ampm = m[4] ? m[4].toUpperCase() : null;
+      if (ampm) {
+        return `${hours}:${minutes} ${ampm}`;
+      } else {
+        const period = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        if (hours === 0) hours = 12;
+        return `${hours}:${minutes} ${period}`;
+      }
+    }
+  }
+
   const dateStr = typeof dateValue === 'object' && dateValue?.$date ? dateValue.$date : dateValue;
   const parsed = new Date(dateStr);
   
   if (isNaN(parsed.getTime())) return '';
   
   const formatted = parsed.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
     minute: '2-digit',
     hour12: true
   });

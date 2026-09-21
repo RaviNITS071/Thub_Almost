@@ -10,6 +10,7 @@ import path from "path";
 import pino from 'pino';
 
 const logger = pino();
+import { parseISTDate } from './dateUtils.js';
 
 // 1. Primary Cloudflare R2 Client (Tender Documents)
 export const r2 = new S3Client({
@@ -111,14 +112,9 @@ export const formatTenderStorageKey = (tenderId, publishedDate, deptCodeOrOrg = 
   let dateStr = 'undated';
   if (publishedDate) {
     try {
-      const parsed = publishedDate instanceof Date ? publishedDate : new Date(publishedDate);
-      if (!isNaN(parsed.getTime())) {
+      const parsed = parseISTDate(publishedDate);
+      if (parsed && !isNaN(parsed.getTime())) {
         dateStr = parsed.toISOString().split('T')[0];
-      } else if (typeof publishedDate === 'string') {
-        const timestamp = Date.parse(publishedDate.replace(/-/g, ' '));
-        if (!isNaN(timestamp)) {
-          dateStr = new Date(timestamp).toISOString().split('T')[0];
-        }
       }
     } catch {
       dateStr = 'undated';

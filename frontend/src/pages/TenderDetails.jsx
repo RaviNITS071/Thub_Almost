@@ -214,6 +214,12 @@ export default function TenderDetails() {
                   <span className="text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                     {tender.status || 'Active'}
                   </span>
+                  {(totalDocsCount === 0 || tender.isDocumentAvailable === false) && (
+                    <span className="text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800 flex items-center gap-1" title={(tender.documentDownloadStartDateStr || tender.documentDownloadStartDate) ? `Documents available on ${formatDateTimeDisplay(tender.documentDownloadStartDateStr || tender.documentDownloadStartDate)}` : 'Pending portal release'}>
+                      <FileClock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                      <span>Docs Available: {(tender.documentDownloadStartDateStr || tender.documentDownloadStartDate) ? formatDateTimeDisplay(tender.documentDownloadStartDateStr || tender.documentDownloadStartDate) : 'Pending Release'}</span>
+                    </span>
+                  )}
                 </div>
                 
                 <h1 className="text-xl sm:text-2xl font-bold font-display text-slate-900 dark:text-white leading-snug">
@@ -462,42 +468,65 @@ export default function TenderDetails() {
               </section>
             </div>
             
-            {/* Work Item Description */}
+            {/* Work Item Details */}
             <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 shadow-xs">
               <h3 className="text-base font-bold font-display text-slate-900 dark:text-white mb-3 border-b border-slate-100 dark:border-slate-700 pb-2.5">
                 Work Item Details
               </h3>
               
-              <div className="mb-4 p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-700">
-                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Scope &amp; Description</span>
-                <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
-                  {tender.workDescription || tender.title}
-                </p>
+              <div className="space-y-3 mb-4">
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Title</span>
+                  <p className="text-xs sm:text-sm text-slate-900 dark:text-slate-100 font-semibold leading-relaxed">
+                    {tender.title}
+                  </p>
+                </div>
+                {tender.workDescription && tender.workDescription !== tender.title && (
+                  <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Work Description</span>
+                    <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-200 font-medium leading-relaxed">
+                      {tender.workDescription}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
                 <div className="space-y-0.5">
-                  <DataRow label="Tender Value" value={<span className="font-mono font-bold text-dalBlue dark:text-blue-300">{formatCurrencyINR(tender.estimatedValue)}</span>} />
-                  <DataRow label="Product Category" value={tender.productCategory} />
-                  <DataRow label="Sub Category" value={tender.subCategory} />
-                  <DataRow label="Contract Type" value={tender.contractType} />
-                  <DataRow label="Tenderer Class" value={tender.tendererClass} />
-                  <DataRow label="Location" value={`${workLoc.famousLocation} (${tender.location || 'As specified in NIT'})`} />
-                </div>
-                <div className="space-y-0.5">
-                  <DataRow label="Bid Validity (Days)" value={<span className="font-mono">{tender.bidValidityDays}</span>} />
-                  <DataRow label="Period Of Work" value={<span className="font-mono">{tender.periodOfWorkDays ? `${tender.periodOfWorkDays} Days` : 'N/A'}</span>} />
                   <DataRow 
-                    label="Pre-Bid Meeting Date" 
+                    label="Tender Value in ₹" 
                     value={
-                      tender.preBidMeetingPlace === 'NA' || !tender.preBidMeetingDate
-                        ? 'No Pre-Bid Meeting' 
-                        : <span className="font-mono">{formatDateDisplay(parseDate(tender.preBidMeetingDate))}</span>
+                      <span className="font-mono font-bold text-dalBlue dark:text-blue-300">
+                        {formatCurrencyINR(tender.estimatedValue)}
+                        {tender.estimatedValue ? ` (${tender.estimatedValue.toLocaleString('en-IN')})` : ''}
+                      </span>
                     } 
                   />
+                  <DataRow label="Product Category" value={tender.productCategory} />
+                  <DataRow label="Sub category" value={tender.subCategory} />
+                  <DataRow label="Contract Type" value={tender.contractType} />
+                  <DataRow label="Location" value={tender.location || 'As specified in NIT'} />
+                  <DataRow label="Pincode" value={<span className="font-mono">{tender.pincode || 'N/A'}</span>} />
+                  <DataRow label="Tenderer Class" value={tender.tendererClass} />
+                  <DataRow label="NDA/Pre Qualification" value={tender.ndaPreQualification} />
+                  <DataRow label="Independent External Monitor/Remarks" value={tender.independentExternalMonitorRemarks} />
+                </div>
+                <div className="space-y-0.5">
+                  <DataRow label="Bid Validity(Days)" value={<span className="font-mono">{tender.bidValidityDays ? `${tender.bidValidityDays}` : 'N/A'}</span>} />
+                  <DataRow label="Period Of Work(Days)" value={<span className="font-mono">{tender.periodOfWorkDays ? `${tender.periodOfWorkDays} Days` : 'N/A'}</span>} />
+                  <DataRow 
+                    label="Pre Bid Meeting Date" 
+                    value={
+                      tender.preBidMeetingPlace === 'NA' || !tender.preBidMeetingDate
+                        ? 'NA' 
+                        : <span className="font-mono">{formatDateTimeDisplay(parseDate(tender.preBidMeetingDate))}</span>
+                    } 
+                  />
+                  <DataRow label="Pre Bid Meeting Place" value={tender.preBidMeetingPlace} />
+                  <DataRow label="Pre Bid Meeting Address" value={tender.preBidMeetingAddress} />
                   <DataRow label="Bid Opening Place" value={tender.bidOpeningPlace} />
-                  <DataRow label="Should Allow NDA" value={tender.shouldAllowNDATender} />
-                  <DataRow label="Preferential Bidder" value={tender.allowPreferentialBidder} />
+                  <DataRow label="Should Allow NDA Tender" value={tender.shouldAllowNDATender} />
+                  <DataRow label="Allow Preferential Bidder" value={tender.allowPreferentialBidder} />
                 </div>
               </div>
             </section>
@@ -572,39 +601,39 @@ export default function TenderDetails() {
               <div className="space-y-2 font-mono text-xs">
                 <div className="flex justify-between py-1">
                   <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Published</span>
-                  <span className="text-slate-800 dark:text-slate-200 font-semibold">{formatDateTimeDisplay(parseDate(tender.publishedDate) || tender.createdAt)}</span>
+                  <span className="text-slate-800 dark:text-slate-200 font-semibold">{formatDateTimeDisplay(tender.publishedDateStr || tender.publishedDate)}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Download Start</span>
-                  <span className="text-slate-800 dark:text-slate-200">{formatDateDisplay(parseDate(tender.documentDownloadStartDate))}</span>
+                  <span className="text-slate-800 dark:text-slate-200">{formatDateTimeDisplay(tender.documentDownloadStartDateStr || tender.documentDownloadStartDate)}</span>
                 </div>
                 <div className="flex justify-between py-1">
                   <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Download End</span>
-                  <span className="text-slate-800 dark:text-slate-200">{formatDateDisplay(parseDate(tender.documentDownloadEndDate))}</span>
+                  <span className="text-slate-800 dark:text-slate-200">{formatDateTimeDisplay(tender.documentDownloadEndDateStr || tender.documentDownloadEndDate)}</span>
                 </div>
-                {tender.clarificationStartDate && tender.clarificationStartDate !== 'NA' && (
+                {(tender.clarificationStartDateStr || tender.clarificationStartDate) && tender.clarificationStartDate !== 'NA' && (
                   <div className="flex justify-between py-1">
                     <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Clarification Start</span>
-                    <span className="text-slate-800 dark:text-slate-200">{tender.clarificationStartDate}</span>
+                    <span className="text-slate-800 dark:text-slate-200">{formatDateTimeDisplay(tender.clarificationStartDateStr || tender.clarificationStartDate)}</span>
                   </div>
                 )}
-                {tender.clarificationEndDate && tender.clarificationEndDate !== 'NA' && (
+                {(tender.clarificationEndDateStr || tender.clarificationEndDate) && tender.clarificationEndDate !== 'NA' && (
                   <div className="flex justify-between py-1">
                     <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Clarification End</span>
-                    <span className="text-slate-800 dark:text-slate-200">{tender.clarificationEndDate}</span>
+                    <span className="text-slate-800 dark:text-slate-200">{formatDateTimeDisplay(tender.clarificationEndDateStr || tender.clarificationEndDate)}</span>
                   </div>
                 )}
                 <div className="flex justify-between py-1 bg-emerald-50 dark:bg-emerald-950/30 px-2 rounded">
                   <span className="font-sans text-[10px] font-semibold uppercase text-emerald-800 dark:text-emerald-300">Bid Start</span>
-                  <span className="text-emerald-800 dark:text-emerald-300 font-bold">{formatDateDisplay(parseDate(tender.bidSubmissionStartDate))}</span>
+                  <span className="text-emerald-800 dark:text-emerald-300 font-bold">{formatDateTimeDisplay(tender.bidSubmissionStartDateStr || tender.bidSubmissionStartDate)}</span>
                 </div>
                 <div className="flex justify-between py-1 bg-red-50 dark:bg-red-950/30 px-2 rounded">
                   <span className="font-sans text-[10px] font-semibold uppercase text-red-800 dark:text-red-300">Bid End</span>
-                  <span className="text-red-800 dark:text-red-300 font-bold">{formatDateDisplay(parseDate(tender.bidSubmissionEndDate))}</span>
+                  <span className="text-red-800 dark:text-red-300 font-bold">{formatDateTimeDisplay(tender.bidSubmissionEndDateStr || tender.bidSubmissionEndDate)}</span>
                 </div>
                 <div className="flex justify-between py-1 pt-2 border-t border-slate-100 dark:border-slate-700">
                   <span className="font-sans text-[10px] font-semibold uppercase text-slate-500">Bid Opening</span>
-                  <span className="text-dalBlue dark:text-blue-400 font-bold">{formatDateDisplay(parseDate(tender.bidOpeningDate))}</span>
+                  <span className="text-dalBlue dark:text-blue-400 font-bold">{formatDateTimeDisplay(tender.bidOpeningDateStr || tender.bidOpeningDate)}</span>
                 </div>
               </div>
             </section>
@@ -616,9 +645,13 @@ export default function TenderDetails() {
                   <Download className="w-4 h-4 text-dalBlue dark:text-blue-400" />
                   <span>Tender Documents &amp; Attachments</span>
                 </h3>
-                {totalDocsCount > 0 && (
+                {totalDocsCount > 0 ? (
                   <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-dalBlue dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                     {totalDocsCount} {totalDocsCount === 1 ? 'file' : 'files'}
+                  </span>
+                ) : (
+                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    Pending Release
                   </span>
                 )}
               </div>
@@ -1023,32 +1056,45 @@ export default function TenderDetails() {
 
                 {/* 3. Fallback when no documents yet released */}
                 {totalDocsCount === 0 && (
-                  <div className="p-3.5 rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 text-slate-700 dark:text-slate-300 space-y-2.5">
-                    <div className="flex items-start gap-2">
-                      <FileClock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div className="p-4 sm:p-5 rounded-xl border border-amber-200 dark:border-amber-900/50 bg-amber-50/70 dark:bg-amber-950/30 text-slate-800 dark:text-slate-200 space-y-3.5 shadow-xs">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 border border-amber-200 dark:border-amber-800">
+                        <FileClock className="w-5 h-5" />
+                      </div>
                       <div>
-                        <h4 className="text-xs font-bold text-amber-900 dark:text-amber-300">
-                          Official NIT PDF Pending Release
+                        <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                          Tender Documents Not Available Yet
                         </h4>
-                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                          Document downloads had not yet commenced at time of portal synchronization.
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                          Official tender documents (NIT notice, drawings, specifications, and BOQ schedule) have not been released by the department on the portal yet.
                         </p>
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-amber-200/60 dark:border-amber-900/40 flex items-center justify-between text-xs">
-                      <span className="text-slate-500">Download Begins:</span>
-                      <span className="font-mono font-bold">
-                        {formatDateDisplay(parseDate(tender.documentDownloadStartDate)) || 'Refer to portal'}
+                    <div className="p-3.5 rounded-lg bg-white/90 dark:bg-slate-900/80 border border-amber-200/80 dark:border-amber-900/60 space-y-1">
+                      <span className="block text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">
+                        Document Availability Schedule
                       </span>
+                      <p className="text-xs sm:text-sm font-medium text-slate-800 dark:text-slate-200">
+                        {tender.documentDownloadStartDate ? (
+                          <>
+                            The documents will be available on{' '}
+                            <strong className="font-mono text-dalBlue dark:text-blue-300 font-bold">
+                              {formatDateTimeDisplay(parseDate(tender.documentDownloadStartDate))}
+                            </strong>
+                          </>
+                        ) : (
+                          'The documents will be available as soon as released on the official portal.'
+                        )}
+                      </p>
                     </div>
 
                     <div className="pt-1">
                       <Button 
                         onClick={handleOpenPortalModal}
-                        className="w-full gap-1.5 bg-dalBlue hover:bg-dalBlue-700 text-white text-xs font-semibold py-2"
+                        className="w-full gap-1.5 bg-dalBlue hover:bg-dalBlue-700 text-white text-xs font-semibold py-2.5 shadow-xs"
                       >
-                        Search on Official Portal <ExternalLink className="w-3.5 h-3.5" />
+                        Check Status on Official Portal <ExternalLink className="w-3.5 h-3.5" />
                       </Button>
                     </div>
                   </div>

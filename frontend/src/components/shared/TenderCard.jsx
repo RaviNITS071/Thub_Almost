@@ -79,15 +79,15 @@ export function TenderCard({ tender }) {
               Division: <span className="font-medium text-slate-700 dark:text-slate-300">{subDept}</span>
             </span>
           )}
-          {subDept && (tender.publishedDate || tender.createdAt) && (
+          {subDept && tender.publishedDate && (
             <span className="text-slate-300 dark:text-slate-600 hidden xs:inline">•</span>
           )}
-          {(tender.publishedDate || tender.createdAt) && (
+          {tender.publishedDate && (
             <span className="inline-flex items-center gap-1 font-normal text-slate-600 dark:text-slate-300 shrink-0">
               <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Published:</span>
               <strong className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
-                {formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}
+                {formatDateTimeDisplay(tender.publishedDate)}
               </strong>
             </span>
           )}
@@ -123,9 +123,9 @@ export function TenderCard({ tender }) {
           <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
             Published Time
           </span>
-          <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate" title={formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}>
+          <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate" title={tender.publishedDate ? formatDateTimeDisplay(tender.publishedDate) : 'Refer to Notice'}>
             <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span className="truncate">{formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}</span>
+            <span className="truncate">{tender.publishedDate ? formatDateTimeDisplay(tender.publishedDate) : 'Refer to Notice'}</span>
           </span>
         </div>
 
@@ -191,6 +191,14 @@ export function TenderCard({ tender }) {
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono font-semibold rounded border border-emerald-200 dark:border-emerald-800" title="BOQ & Work Documents Archive">
               <FileSpreadsheet className="w-3 h-3 shrink-0" />
               <span>{tender.boqZipUrl ? 'BOQ ZIP' : (tender.workItemDocuments?.length > 1 ? `${tender.workItemDocuments.length} Work Docs` : 'BOQ')}</span>
+            </span>
+          )}
+
+          {/* Pending Document Release Badge */}
+          {(!tender.nitDocuments?.length && !tender.pdfUrls?.length && !tender.boqZipUrl && !tender.boqFileUrl && tender.documentDownloadStartDate) && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-[10px] font-mono font-semibold rounded border border-amber-200 dark:border-amber-800" title={`Documents available on ${formatDateTimeDisplay(tender.documentDownloadStartDate)}`}>
+              <Clock className="w-3 h-3 shrink-0" />
+              <span>Docs: {formatDateTimeDisplay(tender.documentDownloadStartDate)}</span>
             </span>
           )}
         </div>

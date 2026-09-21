@@ -3,6 +3,7 @@
  * @description Handles all business logic for Tender retrieval, filtering, AI analysis queuing, and dashboard statistics.
  */
 
+import mongoose from 'mongoose';
 import Tender from '../models/Tender.js';
 import { aiQueue } from '../workers/queue.js';
 
@@ -194,9 +195,16 @@ export const getTenders = async (req, res, next) => {
  */
 export const getTenderById = async (req, res, next) => {
   try {
-    const tender = await Tender.findById(req.params.id);
+    const { id } = req.params;
+    let tender = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      tender = await Tender.findById(id);
+    }
+    if (!tender) {
+      tender = await Tender.findOne({ sourceTenderId: id });
+    }
     
-    // Handle case where ID format is valid but the record does not exist
+    // Handle case where record does not exist
     if (!tender) return res.status(404).json({ error: 'Tender not found' });
     
     res.status(200).json(tender);

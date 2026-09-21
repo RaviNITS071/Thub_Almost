@@ -71,18 +71,34 @@ const tenderSchema = new mongoose.Schema({
   allowPreferentialBidder: { type: String },
   tendererClass: { type: String },
 
-  // --- Critical Dates ---
+  // --- Critical Dates (Both raw portal string, formatted standard time, and parsed Date for IST accuracy) ---
   publishedDate: { type: Date },
+  publishedDateStr: { type: String }, // e.g. "19-Sep-2026 06:30 PM"
+  publishedTime: { type: String },    // e.g. "6:30 PM"
+  publishedDateOnly: { type: String },// e.g. "19-Sep-2026"
   bidOpeningDate: { type: Date },
+  bidOpeningDateStr: { type: String },
+  bidOpeningTime: { type: String },
   documentDownloadStartDate: { type: Date },
+  documentDownloadStartDateStr: { type: String },
+  documentDownloadStartTime: { type: String },
   documentDownloadEndDate: { type: Date },
-  clarificationStartDate: { type: String },
-  clarificationEndDate: { type: String },
+  documentDownloadEndDateStr: { type: String },
+  documentDownloadEndTime: { type: String },
+  clarificationStartDate: { type: Date },
+  clarificationStartDateStr: { type: String },
+  clarificationEndDate: { type: Date },
+  clarificationEndDateStr: { type: String },
   bidSubmissionStartDate: { type: Date },
+  bidSubmissionStartDateStr: { type: String },
+  bidSubmissionStartTime: { type: String },
   bidSubmissionEndDate: { type: Date },
+  bidSubmissionEndDateStr: { type: String },
+  bidSubmissionEndTime: { type: String },
   closingDate: { type: Date, index: true },
+  closingDateStr: { type: String },
+  closingTime: { type: String },
 
-  
   // --- Documents & Storage (Cloudflare R2 mapped) ---
   isDocumentAvailable: { type: Boolean, default: true },
   pdfFetchStatus: { 
@@ -93,13 +109,15 @@ const tenderSchema = new mongoose.Schema({
   },
   pdfRetryCount: { type: Number, default: 0 },
   nitDocuments: [{
+    sNo: { type: Number },
     documentName: { type: String },
     description: { type: String },
     documentSizeKb: { type: Number },
     fileUrl: { type: String } // R2 URL
   }],
   workItemDocuments: [{
-    documentType: { type: String }, // e.g. BOQ
+    sNo: { type: Number },
+    documentType: { type: String }, // e.g. BOQ, Other Document
     documentName: { type: String },
     description: { type: String },
     documentSizeKb: { type: Number },

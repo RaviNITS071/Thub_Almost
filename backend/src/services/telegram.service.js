@@ -26,6 +26,7 @@ class TelegramService {
   async sendMessage(text) {
     if (!this.isEnabled()) return false;
 
+    let telegramSent = false;
     try {
       const response = await fetch(this.apiUrl, {
         method: 'POST',
@@ -39,13 +40,47 @@ class TelegramService {
       });
 
       const data = await response.json();
-      if (!data.ok) {
+      if (data.ok) {
+        telegramSent = true;
+      } else {
         console.warn(`⚠️ [Telegram] API Warning: ${data.description || 'Unknown error'}`);
-        return false;
       }
-      return true;
     } catch (err) {
-      console.warn(`⚠️ [Telegram] Failed to send message: ${err.message}`);
+      console.warn(`⚠️ [Telegram] Direct connection failed (${err.code || err.message}). Likely ISP restriction on api.telegram.org in local network.`);
+    }
+
+    return telegramSent;
+  }
+
+  /**
+   * Send an urgent email alert via Brevo to ensure the user is notified even if Telegram is blocked.
+   */
+  async sendEmailAlert(subject, htmlContent, textContent) {
+    const apiKey = process.env.EMAIL_API_KEY;
+    const toEmail = process.env.EMAIL_FROM ? process.env.EMAIL_FROM.replace(/.*<(.+)>/, '$1').trim() : 'bgmiwale@gmail.com';
+
+    if (!apiKey) return false;
+
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: 'TenderHub Alerts', email: toEmail },
+          to: [{ email: toEmail }],
+          subject,
+          textContent: textContent || htmlContent.replace(/<[^>]+>/g, ''),
+          htmlContent
+        })
+      });
+
+      const data = await res.json();
+      return !!data.messageId;
+    } catch (e) {
+      console.warn('⚠️ [Email Alert] Failed to send email alert:', e.message);
       return false;
     }
   }
@@ -159,7 +194,28 @@ class TelegramService {
     }
     msg += `⏰ <b>Time:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`;
 
-    return this.sendMessage(msg);
+    // 1. Attempt Telegram alert
+    const tgResult = await this.sendMessage(msg);
+
+    // 2. Dispatch urgent Email alert via Brevo so user is guaranteed to receive it
+    const emailSubject = `🚨 [TenderHub Alert] Crawl Interrupted (${mode})`;
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+        <h2 style="color: #e11d48; margin-top: 0;">🚨 TenderHub Crawl Alert</h2>
+        <p>A crawl operation encountered an interruption and needs your attention:</p>
+        <ul style="line-height: 1.8;">
+          <li><b>Mode:</b> ${mode}</li>
+          <li><b>Error:</b> <code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${error || 'Unknown error'}</code></li>
+          ${lastOrg ? `<li><b>Organisation:</b> ${lastOrg}</li>` : ''}
+          <li><b>Checkpoint:</b> ${checkpointSaved ? '✅ Saved to disk (.crawl_checkpoint.json). Resumption is ready.' : '❌ Not saved'}</li>
+          <li><b>Timestamp:</b> ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</li>
+        </ul>
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">This is an automated alert from your TenderHub backend monitoring system.</p>
+      </div>
+    `;
+    await this.sendEmailAlert(emailSubject, emailHtml, msg.replace(/<[^>]+>/g, ''));
+
+    return tgResult;
   }
 }
 

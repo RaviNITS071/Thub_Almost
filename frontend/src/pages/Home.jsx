@@ -344,10 +344,10 @@ export default function Home() {
                         <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className="truncate">{primaryDept}</span>
                       </div>
-                      {(tender.publishedDate || tender.createdAt) && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 shrink-0" title={`Published: ${formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}`}>
+                      {tender.publishedDate && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 shrink-0" title={`Published: ${formatDateTimeDisplay(tender.publishedDate)}`}>
                           <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          <span>{formatDateTimeDisplay(tender.publishedDate || tender.createdAt)}</span>
+                          <span>{formatDateTimeDisplay(tender.publishedDate)}</span>
                         </span>
                       )}
                     </div>

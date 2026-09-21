@@ -1,6 +1,7 @@
 import { TenderSourceAdapter } from './TenderSourceAdapter.js';
 import { chromium } from 'playwright';
 import { uploadFileToR2, uploadPdfToR2, uploadJsonToR2, formatTenderStorageKey, extractDeptCode } from '../../utils/r2Storage.js';
+import { parseISTDate, formatStandardTime, extractDateParts } from '../../utils/dateUtils.js';
 import { captchaService } from '../captcha.service.js';
 import SystemLog from '../../models/SystemLog.js';
 import AdmZip from 'adm-zip';
@@ -136,12 +137,12 @@ export class JKTenderAdapter extends TenderSourceAdapter {
             const tenderId = bracketMatches.length >= 1 ? bracketMatches[bracketMatches.length - 1].replace(/[\[\]]/g, '') : '';
             
             extracted.push({
-              title: titleAnchor ? titleAnchor.innerText.trim() : (tds[1] ? tds[1].innerText.trim() : 'Active Tender'),
+              title: titleAnchor ? titleAnchor.innerText.trim() : (tds[4] ? tds[4].innerText.trim() : 'Active Tender'),
               detailsUrl: titleAnchor ? titleAnchor.href : null,
               sourceTenderId: tenderId || `JK-TENDER-LATEST-${currPg}-${index}`,
-              publishedDate: tds[3] ? tds[3].innerText.trim() : '',
-              closingDate: tds[4] ? tds[4].innerText.trim() : '',
-              openingDate: tds[5] ? tds[5].innerText.trim() : '',
+              publishedDate: tds[1] ? tds[1].innerText.trim() : '',
+              closingDate: tds[2] ? tds[2].innerText.trim() : '',
+              openingDate: tds[3] ? tds[3].innerText.trim() : '',
             });
           }
         });
@@ -559,7 +560,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
     let pdfCountSecured = 0;
 
     try {
-      const detailedData = await page.evaluate(() => {
+      const detailedData = await page.evaluate((summaryData) => {
         const pageText = document.body.innerText;
         const isDocumentAvailable = !pageText.includes('Document download date is not begun yet');
 
@@ -573,7 +574,8 @@ export class JKTenderAdapter extends TenderSourceAdapter {
             if (clean === cleanTarget || clean.startsWith(cleanTarget)) {
               let next = td.nextElementSibling;
               if (next && next.tagName === 'TD') {
-                return next.textContent.trim().replace(/\s+/g, ' ');
+                const val = next.textContent.trim().replace(/\s+/g, ' ');
+                if (val) return val;
               }
             }
           }
@@ -736,6 +738,80 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         if (!invitingAuthorityName) invitingAuthorityName = getTableVal('Name');
         if (!invitingAuthorityAddress) invitingAuthorityAddress = getTableVal('Address');
 
+        // Extract NIT Document table metadata (innermost table with Document Name & Document Size)
+        const rawNitDocs = [];
+        const nitTable = Array.from(document.querySelectorAll('table')).find(tbl => {
+          if (tbl.querySelectorAll('table').length > 0) return false;
+          const text = tbl.innerText || '';
+          return text.includes('Document Name') && text.includes('Document Size');
+        });
+        if (nitTable) {
+          const rows = Array.from(nitTable.querySelectorAll('tr'));
+          rows.forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (tds.length >= 4) {
+              const sNo = parseInt(tds[0].innerText.trim(), 10);
+              const docName = tds[1].innerText.trim();
+              const desc = tds[2].innerText.trim();
+              const sizeKb = parseFloat(tds[3].innerText.trim().replace(/,/g, '')) || 0;
+              const isDoc = /\.(pdf|doc|docx)$/i.test(docName) || docName.toLowerCase().includes('tendernotice');
+              if (!isNaN(sNo) && docName && isDoc && !docName.includes('Search') && !docName.includes('Result')) {
+                rawNitDocs.push({ sNo, documentName: docName, description: desc, documentSizeKb: sizeKb });
+              }
+            }
+          });
+        }
+
+        // Extract Work Item Documents table metadata
+        const workItemDocuments = [];
+        const workTable = document.querySelector('table#workItemDocumenttable') || Array.from(document.querySelectorAll('table')).find(tbl => {
+          const text = tbl.innerText || '';
+          return text.includes('Work Item Documents') && text.includes('Document Type') && text.includes('Document Name');
+        });
+        if (workTable) {
+          const rows = Array.from(workTable.querySelectorAll('tr'));
+          rows.forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (tds.length >= 5) {
+              const sNo = parseInt(tds[0].innerText.trim(), 10);
+              const docType = tds[1].innerText.trim();
+              const docName = tds[2].innerText.trim();
+              const desc = tds[3].innerText.trim();
+              const sizeKb = parseFloat(tds[4].innerText.trim().replace(/,/g, '')) || 0;
+              if (!isNaN(sNo) && docName) {
+                workItemDocuments.push({ sNo, documentType: docType, documentName: docName, description: desc, documentSizeKb: sizeKb });
+              }
+            }
+          });
+        }
+
+        // Extract Critical Dates specifically using exact label lookup across non-container table cells
+        const getDateByLabel = (labels) => {
+          const normalizedLabels = (Array.isArray(labels) ? labels : [labels]).map(l => l.toLowerCase().replace(/[:₹\s]/g, ''));
+          const tds = Array.from(document.querySelectorAll('td'));
+          for (const td of tds) {
+            if (td.querySelector('table')) continue;
+            const text = td.innerText.trim().toLowerCase().replace(/[:₹\s]/g, '');
+            if (normalizedLabels.includes(text)) {
+              let next = td.nextElementSibling;
+              if (next && next.tagName === 'TD') {
+                const val = next.innerText.trim().replace(/\s+/g, ' ');
+                if (val && val !== 'NA' && val !== 'N/A') return val;
+              }
+            }
+          }
+          return '';
+        };
+
+        const critPublishedDate = getDateByLabel(['Published Date', 'e-Published Date', 'Publish Date']);
+        const critBidOpeningDate = getDateByLabel(['Bid Opening Date']);
+        const critDocDownloadStartDate = getDateByLabel(['Document Download / Sale Start Date', 'Document Download Start Date']);
+        const critDocDownloadEndDate = getDateByLabel(['Document Download / Sale End Date', 'Document Download End Date']);
+        const critClarificationStartDate = getDateByLabel(['Clarification Start Date']);
+        const critClarificationEndDate = getDateByLabel(['Clarification End Date']);
+        const critBidSubmissionStartDate = getDateByLabel(['Bid Submission Start Date']);
+        const critBidSubmissionEndDate = getDateByLabel(['Bid Submission End Date']);
+
         return {
           isDocumentAvailable,
           organisationChain: getTableVal('Organisation Chain'),
@@ -783,27 +859,38 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           allowPreferentialBidder: getTableVal('Allow Preferential Bidder'),
           tendererClass: getTableVal('Tenderer Class'),
 
-          publishedDate: getTableVal('Published Date'),
-          bidOpeningDate: getTableVal('Bid Opening Date'),
-          documentDownloadStartDate: getTableVal('Document Download / Sale Start Date'),
-          documentDownloadEndDate: getTableVal('Document Download / Sale End Date'),
-          clarificationStartDate: getTableVal('Clarification Start Date'),
-          clarificationEndDate: getTableVal('Clarification End Date'),
-          bidSubmissionStartDate: getTableVal('Bid Submission Start Date'),
-          bidSubmissionEndDate: getTableVal('Bid Submission End Date'),
-          closingDate: getTableVal('Bid Submission End Date') || getTableVal('Document Download / Sale End Date'),
+          publishedDate: critPublishedDate || summaryData?.publishedDate || null,
+          publishedDateStr: critPublishedDate || summaryData?.publishedDate || null,
+          bidOpeningDate: critBidOpeningDate || summaryData?.openingDate || null,
+          bidOpeningDateStr: critBidOpeningDate || summaryData?.openingDate || null,
+          documentDownloadStartDate: critDocDownloadStartDate || null,
+          documentDownloadStartDateStr: critDocDownloadStartDate || null,
+          documentDownloadEndDate: critDocDownloadEndDate || null,
+          documentDownloadEndDateStr: critDocDownloadEndDate || null,
+          clarificationStartDate: critClarificationStartDate || null,
+          clarificationStartDateStr: critClarificationStartDate || null,
+          clarificationEndDate: critClarificationEndDate || null,
+          clarificationEndDateStr: critClarificationEndDate || null,
+          bidSubmissionStartDate: critBidSubmissionStartDate || null,
+          bidSubmissionStartDateStr: critBidSubmissionStartDate || null,
+          bidSubmissionEndDate: critBidSubmissionEndDate || null,
+          bidSubmissionEndDateStr: critBidSubmissionEndDate || null,
+          closingDate: critBidSubmissionEndDate || critDocDownloadEndDate || summaryData?.closingDate || null,
+          closingDateStr: critBidSubmissionEndDate || critDocDownloadEndDate || summaryData?.closingDate || null,
 
           invitingAuthorityName,
           invitingAuthorityAddress,
           offlineInstruments,
-          coversInfo
+          coversInfo,
+          rawNitDocs,
+          workItemDocuments
         };
-      });
+      }, item);
 
       Object.assign(item, detailedData);
       item.pdfUrls = [];
       item.nitDocuments = [];
-      item.workItemDocuments = [];
+      item.workItemDocuments = detailedData.workItemDocuments || [];
 
       // 1. Scroll down to "Tenders Documents" section
       logger.info(`📜 Scrolling down to "Tenders Documents" for: ${item.sourceTenderId}`);
@@ -846,7 +933,9 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           await pdfLink.scrollIntoViewIfNeeded().catch(() => {});
           await this.humanDelay(page, 200, 350);
 
-          let docDesc = "Tender Notice Document";
+          let docDesc = (item.rawNitDocs && item.rawNitDocs[j]?.description) || "Tender Notice Document";
+          let docSNo = (item.rawNitDocs && item.rawNitDocs[j]?.sNo) || (j + 1);
+          let docDeclaredSize = (item.rawNitDocs && item.rawNitDocs[j]?.documentSizeKb) || null;
           try {
             const rowText = await pdfLink.locator('xpath=ancestor::tr').locator('td').allInnerTexts();
             if (rowText && rowText.length >= 3 && rowText[2].trim()) {
@@ -896,7 +985,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           }
 
           if (download) {
-            const uploaded = await this.processDownloadedPdf(download, item, processedFileNames, docDesc);
+            const uploaded = await this.processDownloadedPdf(download, item, processedFileNames, docDesc, docSNo, docDeclaredSize);
             if (uploaded) pdfCountSecured++;
           }
         }
@@ -1238,7 +1327,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   /**
    * Processes a downloaded PDF, compresses if > 5MB, and uploads to R2
    */
-  async processDownloadedPdf(download, item, processedFileNames, docDescription = 'Tender Notice Document') {
+  async processDownloadedPdf(download, item, processedFileNames, docDescription = 'Tender Notice Document', docSNo = 1, docDeclaredSize = null) {
     try {
       const tempPath = await download.path().catch(() => null);
       if (!tempPath || !fs.existsSync(tempPath)) return false;
@@ -1275,9 +1364,10 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         const finalSizeKb = Math.round(fs.statSync(pathToUpload).size / 1024);
         item.pdfUrls.push(r2Url);
         item.nitDocuments.push({
+          sNo: docSNo,
           documentName: fileName,
           description: docDescription || "Tender Notice Document",
-          documentSizeKb: finalSizeKb,
+          documentSizeKb: docDeclaredSize || finalSizeKb,
           fileUrl: r2Url
         });
         logger.info(`📄 [PDF Secured] ${fileName} (${finalSizeKb} KB) -> R2`);
@@ -1501,11 +1591,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   }
 
   normalize(rawTenderData) {
-    const parseDate = (dateStr) => {
-      if (!dateStr || dateStr === 'NA' || dateStr === 'N/A' || (typeof dateStr === 'string' && dateStr.trim() === '')) return null;
-      const timestamp = Date.parse(String(dateStr).replace(/-/g, ' '));
-      return !isNaN(timestamp) ? new Date(timestamp) : null;
-    };
+    const parseDate = (dateStr) => parseISTDate(dateStr);
 
     return {
       title: rawTenderData.title || "Untitled Tender",
@@ -1563,15 +1649,32 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       allowPreferentialBidder: rawTenderData.allowPreferentialBidder,
       tendererClass: rawTenderData.tendererClass || '',
 
-      publishedDate: parseDate(rawTenderData.publishedDate) || new Date(),
+      publishedDate: parseDate(rawTenderData.publishedDate) || null,
+      publishedDateStr: rawTenderData.publishedDateStr || rawTenderData.publishedDate || null,
+      publishedTime: rawTenderData.publishedTime || formatStandardTime(rawTenderData.publishedDateStr || rawTenderData.publishedDate),
+      publishedDateOnly: rawTenderData.publishedDateOnly || extractDateParts(rawTenderData.publishedDateStr || rawTenderData.publishedDate).dateOnly,
       bidOpeningDate: parseDate(rawTenderData.bidOpeningDate),
+      bidOpeningDateStr: rawTenderData.bidOpeningDateStr || rawTenderData.bidOpeningDate || null,
+      bidOpeningTime: rawTenderData.bidOpeningTime || formatStandardTime(rawTenderData.bidOpeningDateStr || rawTenderData.bidOpeningDate),
       documentDownloadStartDate: parseDate(rawTenderData.documentDownloadStartDate),
+      documentDownloadStartDateStr: rawTenderData.documentDownloadStartDateStr || rawTenderData.documentDownloadStartDate || null,
+      documentDownloadStartTime: rawTenderData.documentDownloadStartTime || formatStandardTime(rawTenderData.documentDownloadStartDateStr || rawTenderData.documentDownloadStartDate),
       documentDownloadEndDate: parseDate(rawTenderData.documentDownloadEndDate),
-      clarificationStartDate: rawTenderData.clarificationStartDate === 'NA' ? null : rawTenderData.clarificationStartDate,
-      clarificationEndDate: rawTenderData.clarificationEndDate === 'NA' ? null : rawTenderData.clarificationEndDate,
+      documentDownloadEndDateStr: rawTenderData.documentDownloadEndDateStr || rawTenderData.documentDownloadEndDate || null,
+      documentDownloadEndTime: rawTenderData.documentDownloadEndTime || formatStandardTime(rawTenderData.documentDownloadEndDateStr || rawTenderData.documentDownloadEndDate),
+      clarificationStartDate: parseDate(rawTenderData.clarificationStartDate),
+      clarificationStartDateStr: rawTenderData.clarificationStartDateStr || rawTenderData.clarificationStartDate || null,
+      clarificationEndDate: parseDate(rawTenderData.clarificationEndDate),
+      clarificationEndDateStr: rawTenderData.clarificationEndDateStr || rawTenderData.clarificationEndDate || null,
       bidSubmissionStartDate: parseDate(rawTenderData.bidSubmissionStartDate),
+      bidSubmissionStartDateStr: rawTenderData.bidSubmissionStartDateStr || rawTenderData.bidSubmissionStartDate || null,
+      bidSubmissionStartTime: rawTenderData.bidSubmissionStartTime || formatStandardTime(rawTenderData.bidSubmissionStartDateStr || rawTenderData.bidSubmissionStartDate),
       bidSubmissionEndDate: parseDate(rawTenderData.bidSubmissionEndDate),
+      bidSubmissionEndDateStr: rawTenderData.bidSubmissionEndDateStr || rawTenderData.bidSubmissionEndDate || null,
+      bidSubmissionEndTime: rawTenderData.bidSubmissionEndTime || formatStandardTime(rawTenderData.bidSubmissionEndDateStr || rawTenderData.bidSubmissionEndDate),
       closingDate: parseDate(rawTenderData.closingDate) || parseDate(rawTenderData.bidSubmissionEndDate),
+      closingDateStr: rawTenderData.closingDateStr || rawTenderData.closingDate || rawTenderData.bidSubmissionEndDateStr || null,
+      closingTime: rawTenderData.closingTime || formatStandardTime(rawTenderData.closingDateStr || rawTenderData.closingDate || rawTenderData.bidSubmissionEndDateStr),
 
       departmentCode: rawTenderData.departmentCode || extractDeptCode(rawTenderData.sourceTenderId, rawTenderData.organisationChain),
       departmentName: rawTenderData.departmentName || (rawTenderData.organisationChain ? rawTenderData.organisationChain.split('||')[0].trim() : 'General'),
