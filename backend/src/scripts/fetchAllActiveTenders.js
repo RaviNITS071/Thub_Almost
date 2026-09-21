@@ -46,9 +46,26 @@ async function run() {
   const numericArg = args.find(a => /^\d+$/.test(a));
   const limit = numericArg ? parseInt(numericArg, 10) : 50000;
 
+  let orgFilter = null;
+  let excludeOrgFilter = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--org' && args[i + 1]) {
+      orgFilter = args[i + 1];
+    } else if (args[i] === '--exclude-org' && args[i + 1]) {
+      excludeOrgFilter = args[i + 1];
+    }
+  }
+
   if (isReset) {
     clearCheckpoint();
     console.log(`\n🔄 [RESET] Cleared previous checkpoint. Starting fresh from Organisation #1.`);
+  }
+
+  if (orgFilter) {
+    console.log(`🎯 [FILTER] Only processing organisations matching: "${orgFilter}"`);
+  }
+  if (excludeOrgFilter) {
+    console.log(`🚫 [EXCLUDE] Excluding organisations matching: "${excludeOrgFilter}"`);
   }
 
   let checkpoint = isReset ? null : loadCheckpoint();
@@ -154,6 +171,8 @@ async function run() {
         limit,
         countSkippedTowardsLimit: false,
         resumeFrom,
+        orgFilter,
+        excludeOrgFilter,
         onCheckpoint: async (cp) => {
           lastCheckpointState = {
             mode: 'DEPARTMENT',
@@ -202,9 +221,15 @@ async function run() {
             const existing = await Tender.findOne({
               sourcePortal: 'JK_TENDERS',
               sourceTenderId
-            }).select('pdfFetchStatus').lean();
+            }).select('pdfFetchStatus boqZipUrl boqFetchStatus publishedDateStr isDocumentAvailable').lean();
 
-            if (existing && existing.pdfFetchStatus === 'COMPLETED') {
+            // Strict check: tender is complete ONLY if metadata has new schema AND documents are secured
+            if (
+              existing &&
+              existing.publishedDateStr &&
+              (existing.pdfFetchStatus === 'COMPLETED' || existing.isDocumentAvailable === false) &&
+              (existing.boqZipUrl || existing.boqFetchStatus === 'COMPLETED' || existing.boqFetchStatus === 'NOT_AVAILABLE' || existing.isDocumentAvailable === false)
+            ) {
               skippedCount++;
               return true;
             }

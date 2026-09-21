@@ -343,6 +343,18 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       for (let o = 0; o < orgRows.length && currentCount < maxTenders; o++) {
         const org = orgRows[o];
 
+        // Multi-instance distributed crawling support
+        if (filters.orgFilter) {
+          const targets = filters.orgFilter.split(',').map(s => s.trim().toLowerCase());
+          const match = targets.some(t => org.orgName.toLowerCase().includes(t));
+          if (!match) continue;
+        }
+        if (filters.excludeOrgFilter) {
+          const targets = filters.excludeOrgFilter.split(',').map(s => s.trim().toLowerCase());
+          const match = targets.some(t => org.orgName.toLowerCase().includes(t));
+          if (match) continue;
+        }
+
         // Resume support: skip organisations before resumeFrom.orgIndex
         if (filters.resumeFrom && typeof filters.resumeFrom.orgIndex === 'number') {
           if (o < filters.resumeFrom.orgIndex) {
