@@ -1164,13 +1164,28 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       if (state === 'TENDER_LIST') return true;
     }
 
+    const clickOrgCountLink = async (targetOrg) => {
+      await page.waitForSelector("table#table tr[id^='informal'], table.list_table tr", { timeout: 20000 }).catch(() => {});
+      // In NIC eProcurement: td[1] is Organisation Name (plain text), td[2] is Tender Count (clickable <a> link)
+      let orgRow = page.locator("table#table tr[id^='informal'], table.list_table tr[id^='informal'], table.list_table tr")
+        .filter({ hasText: targetOrg })
+        .first();
+      let link = orgRow.locator("td:nth-child(3) a, a.link2, a").first();
+      const count = await link.count().catch(() => 0);
+      if (count > 0) return link;
+
+      // Fallback: any tr matching target text
+      orgRow = page.locator("tr").filter({ hasText: targetOrg }).first();
+      return orgRow.locator("td:nth-child(3) a, a.link2, a").first();
+    };
+
     // If on Organisation List, re-enter the organisation
     if (state === 'ORG_LIST') {
       logger.warn(`🔙 On Organisation List, re-entering "${orgName}"...`);
-      const orgLink = page.locator(`a:has-text("${orgName}")`).first();
+      const orgLink = await clickOrgCountLink(orgName);
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
-        orgLink.click({ noWaitAfter: true })
+        orgLink.click({ noWaitAfter: true, timeout: 20000 }).catch(() => orgLink.click({ force: true, noWaitAfter: true }))
       ]);
       await this.humanDelay(page, 500, 800);
     } else if (state !== 'TENDER_LIST') {
@@ -1191,13 +1206,13 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       const orgMenuLink = page.locator("a:has-text('Tenders by Organisation'), a#DirectLink_0").first();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
-        orgMenuLink.click({ noWaitAfter: true })
+        orgMenuLink.click({ noWaitAfter: true, timeout: 20000 }).catch(() => orgMenuLink.click({ force: true, noWaitAfter: true }))
       ]);
       await this.humanDelay(page, 500, 800);
-      const reenteredOrgLink = page.locator(`a:has-text("${orgName}")`).first();
+      const reenteredOrgLink = await clickOrgCountLink(orgName);
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {}),
-        reenteredOrgLink.click({ noWaitAfter: true })
+        reenteredOrgLink.click({ noWaitAfter: true, timeout: 20000 }).catch(() => reenteredOrgLink.click({ force: true, noWaitAfter: true }))
       ]);
       await this.humanDelay(page, 500, 800);
     }
