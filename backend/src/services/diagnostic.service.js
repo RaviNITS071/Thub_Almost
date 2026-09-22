@@ -95,12 +95,14 @@ export class DiagnosticService {
    * Aggregates database counts, missing PDFs, and archive cleanup stats
    */
   async getDatabaseOverview() {
+    const now = new Date();
     const cutoff30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     const [
       totalTenders,
       activeTenders,
       archivedTenders,
+      expiredTenders,
       expiredArchivedTenders,
       missingPdfCount,
       completedPdfCount,
@@ -108,8 +110,9 @@ export class DiagnosticService {
       cronConfig
     ] = await Promise.all([
       Tender.countDocuments(),
-      Tender.countDocuments({ status: 'ACTIVE' }),
+      Tender.countDocuments({ status: 'ACTIVE', closingDate: { $gte: now } }),
       Tender.countDocuments({ status: 'ARCHIVED' }),
+      Tender.countDocuments({ $or: [{ status: 'EXPIRED' }, { closingDate: { $lt: now } }] }),
       Tender.countDocuments({ status: 'ARCHIVED', closingDate: { $lt: cutoff30Days } }),
       Tender.countDocuments({ pdfFetchStatus: 'PENDING', isDocumentAvailable: true }),
       Tender.countDocuments({ pdfFetchStatus: 'COMPLETED' }),
@@ -122,6 +125,7 @@ export class DiagnosticService {
         total: totalTenders,
         active: activeTenders,
         archived: archivedTenders,
+        expired: expiredTenders,
         expiredArchivedEligibleForPurge: expiredArchivedTenders,
       },
       documents: {

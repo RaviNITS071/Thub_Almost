@@ -20,6 +20,30 @@ const logger = pino();
 
 export class RetentionService {
   /**
+   * Evaluates all tenders against current Indian Standard Time.
+   * Marks status as 'EXPIRED' if current time is greater than closing date and time.
+   */
+  async markExpiredTenders() {
+    const now = new Date();
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
+
+    const result = await Tender.updateMany(
+      {
+        closingDate: { $lt: now },
+        status: { $ne: 'EXPIRED' }
+      },
+      { $set: { status: 'EXPIRED' } }
+    );
+
+    if (result.modifiedCount > 0) {
+      logger.info(`[RetentionService] 🏷️ Marked ${result.modifiedCount} tender(s) as EXPIRED (Current time > closing date & time).`);
+    }
+    return result.modifiedCount;
+  }
+
+  /**
    * Purges all expired tenders (closingDate < now or status === 'EXPIRED')
    * from MongoDB, Primary Cloudflare R2, and Secondary Backup Cloudflare R2.
    * Ensures that expired tender data (both JSON metadata and documents)
@@ -32,6 +56,9 @@ export class RetentionService {
     if (mongoose.connection.readyState !== 1) {
       await connectDB();
     }
+
+    // Mark any newly expired tenders first
+    await this.markExpiredTenders().catch(() => {});
 
     const filter = {
       $or: [

@@ -82,12 +82,12 @@ export function TenderCard({ tender }) {
           {subDept && tender.publishedDate && (
             <span className="text-slate-300 dark:text-slate-600 hidden xs:inline">•</span>
           )}
-          {tender.publishedDate && (
+          {(tender.publishedDateStr || tender.publishedDate) && (
             <span className="inline-flex items-center gap-1 font-normal text-slate-600 dark:text-slate-300 shrink-0">
               <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>Published:</span>
               <strong className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
-                {formatDateTimeDisplay(tender.publishedDate)}
+                {formatDateTimeDisplay(tender.publishedDateStr || tender.publishedDate)}
               </strong>
             </span>
           )}
@@ -123,9 +123,9 @@ export function TenderCard({ tender }) {
           <span className="block text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider truncate">
             Published Time
           </span>
-          <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate" title={tender.publishedDate ? formatDateTimeDisplay(tender.publishedDate) : 'Refer to Notice'}>
+          <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate" title={(tender.publishedDateStr || tender.publishedDate) ? formatDateTimeDisplay(tender.publishedDateStr || tender.publishedDate) : 'Refer to Notice'}>
             <Clock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span className="truncate">{tender.publishedDate ? formatDateTimeDisplay(tender.publishedDate) : 'Refer to Notice'}</span>
+            <span className="truncate">{(tender.publishedDateStr || tender.publishedDate) ? formatDateTimeDisplay(tender.publishedDateStr || tender.publishedDate) : 'Refer to Notice'}</span>
           </span>
         </div>
 
@@ -135,7 +135,7 @@ export function TenderCard({ tender }) {
           </span>
           <span className="font-mono text-[11px] sm:text-xs lg:text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1 truncate">
             <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-            <span className="truncate">{formatDateDisplay(tender.bidSubmissionEndDate?.$date || tender.closingDate)}</span>
+            <span className="truncate">{formatDateDisplay(tender.closingDateStr || tender.bidSubmissionEndDateStr || tender.closingDate)}</span>
           </span>
         </div>
 

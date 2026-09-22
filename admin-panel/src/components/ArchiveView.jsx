@@ -100,11 +100,11 @@ export function ArchiveView({ overview, onRefresh }) {
 
           <div className="space-y-2">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-display font-black text-slate-900 dark:text-white">02:00 AM</span>
+              <span className="text-3xl font-display font-black text-slate-900 dark:text-white">03:00 AM</span>
               <span className="text-xs font-mono text-slate-500 dark:text-slate-400">Nightly (IST)</span>
             </div>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Every night at 02:00 AM, the scheduler triggers a synchronized purge:
+              Every night at 03:00 AM, the scheduler triggers a synchronized flush:
             </p>
             <ul className="text-[11px] text-slate-600 dark:text-slate-300 space-y-1 list-disc list-inside">
               <li><strong>Expired Tenders:</strong> Purged immediately from MongoDB, Primary R2 &amp; Secondary Backup R2 (both JSON and documents, 0-day retention).</li>
@@ -115,21 +115,26 @@ export function ArchiveView({ overview, onRefresh }) {
           <div className="pt-3 border-t border-slate-100 dark:border-slate-700/80 text-xs font-mono text-slate-500 dark:text-slate-400 space-y-1.5">
             <div>Expired Tender Retention: <strong className="text-emerald-600 dark:text-emerald-400">0 Days (Immediate Primary &amp; Backup Deletion)</strong></div>
             <div>Archive Retention Policy: <strong className="text-slate-800 dark:text-slate-200">30 Calendar Days</strong></div>
-            <div>Last Automated Purge: <strong className="text-slate-800 dark:text-slate-200">{cronConfig.lastPurgedAt ? new Date(cronConfig.lastPurgedAt).toLocaleString() : 'Pending Next Cycle'}</strong></div>
+            <div>Last Automated Flush: <strong className="text-slate-800 dark:text-slate-200">{cronConfig.lastPurgedAt ? new Date(cronConfig.lastPurgedAt).toLocaleString() : 'Pending Next Cycle'}</strong></div>
           </div>
         </div>
 
-        {/* 2. Immediate Expired Tenders Purge (Primary + Backup Server) */}
+        {/* 2. Immediate Expired Tenders Flush (Primary + Backup Server) */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl sm:rounded-3xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-chinarRed">
               <ShieldAlert className="w-4 h-4" />
-              <span>Synchronized Expired Purge (Primary &amp; Backup)</span>
+              <span>Flush Expired Tenders (Primary &amp; Backup)</span>
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Immediately purges all expired tenders (both <code className="font-mono text-purple-600 dark:text-purple-400">tender.json</code> and documents like PDFs/Excel) from MongoDB Atlas, Primary Cloudflare R2, and the Backup Server. No 14-day delay or retention in backup.
+              Immediately flushes and removes all expired tenders (both <code className="font-mono text-purple-600 dark:text-purple-400">tender.json</code> and documents like PDFs/Excel) from MongoDB Atlas, Primary Cloudflare R2, and the Backup Server.
             </p>
+
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-xl p-2.5 text-xs text-red-700 dark:text-red-300 font-mono flex items-center justify-between">
+              <span>Expired (Date &amp; Time Passed):</span>
+              <strong className="text-sm font-bold text-chinarRed">{tenders.expired || 0} tender(s)</strong>
+            </div>
           </div>
 
           <button
@@ -140,12 +145,12 @@ export function ArchiveView({ overview, onRefresh }) {
             {isPurgingExpired ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Purging Primary &amp; Backup Server...</span>
+                <span>Flushing Primary &amp; Backup Server...</span>
               </>
             ) : (
               <>
                 <Trash2 className="w-4 h-4" />
-                <span>Purge Expired Tenders Now (Primary + Backup)</span>
+                <span>Flush Expired Tenders Now</span>
               </>
             )}
           </button>

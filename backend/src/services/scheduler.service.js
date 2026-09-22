@@ -46,13 +46,13 @@ export class SchedulerService {
     // 6:30 PM (18:30)
     this.scheduleSyncSlot('30 18 * * *', '06:30 PM');
 
-    // 3. Automated Expired Tenders Purge & Daily DB Backup (Runs daily at 02:00 AM)
-    cron.schedule('0 2 * * *', async () => {
-      logger.info('[Scheduler] Running scheduled expired tenders purge from MongoDB & Cloudflare R2...');
-      await retentionService.purgeExpiredTenders('CRON_SCHEDULE').catch(err => {
+    // 3. Automated Expired Tenders Purge & Daily DB Backup (Runs daily at 03:00 AM IST)
+    cron.schedule('0 3 * * *', async () => {
+      logger.info('[Scheduler] ⏰ Running scheduled 03:00 AM expired tenders purge from MongoDB & Cloudflare R2...');
+      await retentionService.purgeExpiredTenders('CRON_SCHEDULE_03AM').catch(err => {
         logger.error(`[Scheduler] Purge failed: ${err.message}`);
       });
-      await this.purgeExpiredArchivedTenders('CRON_SCHEDULE');
+      await this.purgeExpiredArchivedTenders('CRON_SCHEDULE_03AM');
       
       logger.info('[Scheduler] Running scheduled nightly database backup & secondary Cloudflare mirror...');
       await backupService.createDatabaseBackup().catch(err => {
@@ -68,7 +68,16 @@ export class SchedulerService {
       timezone: 'Asia/Kolkata'
     });
 
-    logger.info('✅ [Scheduler] All 5 automated scraping slots & archive retention cron registered successfully.');
+    // 4. Real-time Status Sync: Mark tenders whose closing date + time has passed as EXPIRED (Every 15 mins)
+    cron.schedule('*/15 * * * *', async () => {
+      await retentionService.markExpiredTenders().catch(err => {
+        logger.error(`[Scheduler] Real-time expiry check failed: ${err.message}`);
+      });
+    }, {
+      timezone: 'Asia/Kolkata'
+    });
+
+    logger.info('✅ [Scheduler] All 5 automated scraping slots, 3:00 AM purge cron & 15-min expiry watcher registered successfully.');
   }
 
   /**
