@@ -38,9 +38,11 @@ async function main() {
   // 1. Parse arguments
   let dateArg = null;
   let orgFilter = null;
+  let excludeOrg = null;
   let limit = Infinity;
   let force = false;
   let isHeadless = true;
+  let shard = null;
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -49,6 +51,9 @@ async function main() {
       i++;
     } else if ((a === '--org' || a === '-o') && args[i + 1]) {
       orgFilter = args[i + 1];
+      i++;
+    } else if ((a === '--exclude-org' || a === '--exclude' || a === '-x') && args[i + 1]) {
+      excludeOrg = args[i + 1];
       i++;
     } else if ((a === '--limit' || a === '-l') && args[i + 1]) {
       limit = parseInt(args[i + 1], 10);
@@ -59,6 +64,9 @@ async function main() {
       isHeadless = false;
     } else if (a === '--headless' && args[i + 1] === 'false') {
       isHeadless = false;
+      i++;
+    } else if ((a === '--shard' || a === '-s' || a === '--instance') && args[i + 1]) {
+      shard = args[i + 1];
       i++;
     } else if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/.test(a) || /^\d{4}-\d{2}-\d{2}$/.test(a)) {
       dateArg = a;
@@ -73,6 +81,8 @@ async function main() {
   console.log(`======================================================================`);
   console.log(`🎯 Target Published Date: ${dateConfig.displayString} ("${dateConfig.targetDatePrefix}")`);
   console.log(`🏛️ Organisation Filter:   ${orgFilter || 'ALL ORGANISATIONS'}`);
+  if (excludeOrg) console.log(`🚫 Excluded Organisation: ${excludeOrg}`);
+  if (shard) console.log(`🔀 Distributed Shard:     ${shard}`);
   console.log(`🌐 Headless Mode:         ${isHeadless}`);
   console.log(`⚡ Force Re-download:     ${force}`);
   console.log(`🎯 Limit:                 ${limit === Infinity ? 'Unlimited' : limit}`);
@@ -83,8 +93,8 @@ async function main() {
   // Send Telegram crawl started update (if configured)
   try {
     await telegramService.sendCrawlStarted?.({
-      mode: `TARGETED DATE (${dateConfig.displayString})`,
-      targetLimit: orgFilter ? `Org: ${orgFilter}` : 'All Organisations'
+      mode: `TARGETED DATE (${dateConfig.displayString})${shard ? ` [Shard ${shard}]` : ''}`,
+      targetLimit: orgFilter ? `Org: ${orgFilter}` : (shard ? `Shard ${shard}` : 'All Organisations')
     });
   } catch {}
 
@@ -104,6 +114,8 @@ async function main() {
     const summary = await adapter.fetchTendersByDate({
       targetDate: dateConfig.targetDatePrefix,
       orgFilter,
+      excludeOrg,
+      shard,
       headless: isHeadless,
       force,
       limit

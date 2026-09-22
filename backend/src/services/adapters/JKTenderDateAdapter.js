@@ -152,15 +152,32 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
     const dateConfig = normalizeTargetDate(options.targetDate);
     const targetPrefix = dateConfig.targetDatePrefix.toLowerCase(); // e.g. "22-sep-2026"
     const orgFilter = options.orgFilter || null;
+    const excludeOrg = options.excludeOrg || null;
     const isHeadless = options.headless !== false && process.env.SCRAPER_HEADLESS !== 'false';
     const force = !!options.force;
     const limit = options.limit || Infinity;
+    const shard = options.shard || null;
+    let shardPart = null;
+    let shardTotal = null;
+    if (shard) {
+      const parts = String(shard).split('/').map(n => parseInt(n.trim(), 10));
+      if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[1] > 0) {
+        shardPart = parts[0];
+        shardTotal = parts[1];
+      }
+    }
 
     console.log(`\n======================================================================`);
     console.log(`🚀 JKTENDERS TARGETED DATE CRAWLER`);
     console.log(`======================================================================`);
     console.log(`📅 Target Published Date: ${dateConfig.displayString} ("${dateConfig.targetDatePrefix}")`);
     console.log(`🏛️ Organisation Filter:   ${orgFilter || 'ALL ORGANISATIONS'}`);
+    if (excludeOrg) {
+      console.log(`🚫 Excluded Organisation: ${excludeOrg}`);
+    }
+    if (shardPart !== null && shardTotal !== null) {
+      console.log(`🔀 Distributed Shard:     ${shardPart}/${shardTotal} (Instance ${shardPart} of ${shardTotal})`);
+    }
     console.log(`🌐 Browser Headless:      ${isHeadless}`);
     console.log(`⚡ Force Re-ingest:       ${force}`);
     console.log(`🎯 Ingestion Limit:       ${limit === Infinity ? 'Unlimited' : limit}`);
@@ -209,12 +226,21 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
 
       for (let o = 0; o < organisations.length && totalIngested < limit; o++) {
         const org = organisations[o];
+        if (shardPart !== null && shardTotal !== null) {
+          if (o % shardTotal !== (shardPart - 1)) {
+            continue;
+          }
+        }
         if (orgFilter && !org.orgName.toLowerCase().includes(orgFilter.toLowerCase())) {
+          continue;
+        }
+        if (excludeOrg && org.orgName.toLowerCase().includes(excludeOrg.toLowerCase())) {
+          console.log(`⏩ Skipping excluded organisation: "${org.orgName}"`);
           continue;
         }
 
         console.log(`\n----------------------------------------------------------------------`);
-        console.log(`🏛️ [${o + 1}/${organisations.length}] Organisation: "${org.orgName}" (${org.tenderCount} active tenders on portal)`);
+        console.log(`🏛️ [${o + 1}/${organisations.length}]${shardTotal ? ` [Shard ${shardPart}/${shardTotal}]` : ''} Organisation: "${org.orgName}" (${org.tenderCount} active tenders on portal)`);
         console.log(`----------------------------------------------------------------------`);
 
         // Click organisation link
