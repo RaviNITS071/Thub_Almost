@@ -163,7 +163,8 @@ async function enrichAll() {
         let tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: tenderSummary.sourceTenderId }).locator("td:nth-child(5) a, a").first();
         const exists = await tenderLink.count().catch(() => 0);
         if (exists === 0) {
-          tenderLink = page.locator("table.list_table tr:has(td:nth-child(5) a)").nth(t).locator("td:nth-child(5) a").first();
+          console.warn(`⚠️ [Skip] Tender link for ${tenderSummary.sourceTenderId} not found on current page.`);
+          continue;
         }
 
         try {

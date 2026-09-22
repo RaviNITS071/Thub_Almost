@@ -207,31 +207,18 @@ export const getTenderById = async (req, res, next) => {
     // Handle case where record does not exist
     if (!tender) return res.status(404).json({ error: 'Tender not found' });
     
-    // Automatically discover and attach sibling tenders under the same NIT / reference
+    // A tender has siblings ONLY IF explicitly detected during scraping on an intermediate multi-item page
     let relatedTenders = [];
-    const searchConditions = [];
-
-    if (tender.tenderReferenceNumber && tender.tenderReferenceNumber.trim() && tender.tenderReferenceNumber.trim() !== 'NA') {
-      searchConditions.push({ tenderReferenceNumber: tender.tenderReferenceNumber.trim() });
-    }
-    if (tender.baseTenderId && tender.baseTenderId.trim()) {
-      searchConditions.push({ baseTenderId: tender.baseTenderId.trim() });
-    }
-    if (Array.isArray(tender.relatedTenderIds) && tender.relatedTenderIds.length > 0) {
-      searchConditions.push({ sourceTenderId: { $in: tender.relatedTenderIds } });
-    }
-
-    if (searchConditions.length > 0) {
+    if (tender.isMultiTender && Array.isArray(tender.relatedTenderIds) && tender.relatedTenderIds.length > 0) {
       relatedTenders = await Tender.find({
-        _id: { $ne: tender._id },
-        $or: searchConditions
+        sourceTenderId: { $in: tender.relatedTenderIds }
       })
       .select('sourceTenderId title estimatedValue publishedDate publishedDateStr closingDate status')
       .sort({ sourceTenderId: 1 })
       .lean();
     }
 
-    const isMultiTender = tender.isMultiTender || relatedTenders.length > 0;
+    const isMultiTender = !!(tender.isMultiTender && relatedTenders.length > 0);
 
     res.status(200).json({
       ...tender,

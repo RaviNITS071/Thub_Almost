@@ -39,8 +39,8 @@ async function fixAnomalies() {
     const refDate = (docDate && docDate.getFullYear() === 2026) ? docDate : ((bidStartDate && bidStartDate.getFullYear() === 2026) ? bidStartDate : null);
     const refDateStr = (docDate && docDate.getFullYear() === 2026) ? t.documentDownloadStartDateStr : ((bidStartDate && bidStartDate.getFullYear() === 2026) ? t.bidSubmissionStartDateStr : null);
 
-    // If published date is after doc download / bid submission start by more than 24 hours
-    if (pubDate && refDate && (pubDate.getTime() - refDate.getTime() > 24 * 3600 * 1000)) {
+    // In NIC eProcurement portals, Published Date cannot be later than Document Download / Bid Submission Start Date
+    if (pubDate && refDate && (pubDate.getTime() > refDate.getTime())) {
       toFix.push({
         tender: t,
         refDateStr,

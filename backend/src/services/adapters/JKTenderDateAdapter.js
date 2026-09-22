@@ -306,11 +306,22 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
               console.log(`   🔖 Title: "${rowSummary.title.slice(0, 75)}..."`);
 
               try {
-                // Click tender link to open Tender Details using exact row index
-                const tenderLink = page.locator("table.list_table tr[id^='informal']")
-                  .nth(rowSummary.index)
-                  .locator("td:nth-child(5) a, a")
-                  .first();
+                // Click tender link: match exact bracketed tender ID to avoid substring or index shift collisions
+                let tenderRow = page.locator("table.list_table tr[id^='informal']").filter({ hasText: `[${rowSummary.sourceTenderId}]` }).first();
+                let hasExactRow = (await tenderRow.count().catch(() => 0)) > 0;
+                let tenderLink;
+                if (hasExactRow) {
+                  tenderLink = tenderRow.locator("td:nth-child(5) a, a").first();
+                } else {
+                  const candidateRow = page.locator("table.list_table tr[id^='informal']").nth(rowSummary.index);
+                  const candidateText = await candidateRow.innerText().catch(() => '');
+                  if (candidateText.includes(rowSummary.sourceTenderId)) {
+                    tenderLink = candidateRow.locator("td:nth-child(5) a, a").first();
+                  } else {
+                    console.warn(`⚠️ [Strict Match Guard] Row for ${rowSummary.sourceTenderId} not verified on current page. Skipping to avoid cross-tender contamination.`);
+                    continue;
+                  }
+                }
 
                 await Promise.all([
                   page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 35000 }).catch(() => {}),
@@ -359,7 +370,23 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
                     console.log(`\n   🔨 [Multi-Work Item ${w + 1}/${workRows.length}] Processing: ${workSummary.sourceTenderId}`);
                     console.log(`      🔖 Work Title: "${workSummary.title.slice(0, 70)}..."`);
 
-                    const workLink = page.locator("table.list_table tr[id^='informal']").nth(workSummary.index).locator("td:nth-child(5) a, a").first();
+                    // Strictly locate work item row by bracketed ID to avoid index drift
+                    let workRow = page.locator("table.list_table tr[id^='informal']").filter({ hasText: `[${workSummary.sourceTenderId}]` }).first();
+                    let hasExactWork = (await workRow.count().catch(() => 0)) > 0;
+                    let workLink;
+                    if (hasExactWork) {
+                      workLink = workRow.locator("td:nth-child(5) a, a").first();
+                    } else {
+                      const candidateWork = page.locator("table.list_table tr[id^='informal']").nth(workSummary.index);
+                      const candText = await candidateWork.innerText().catch(() => '');
+                      if (candText.includes(workSummary.sourceTenderId)) {
+                        workLink = candidateWork.locator("td:nth-child(5) a, a").first();
+                      } else {
+                        console.warn(`⚠️ [Strict Match Guard] Sub-table row for ${workSummary.sourceTenderId} not verified. Skipping.`);
+                        continue;
+                      }
+                    }
+
                     await Promise.all([
                       page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 35000 }).catch(() => {}),
                       workLink.click({ noWaitAfter: true, timeout: 15000 }).catch(() => workLink.click({ force: true, noWaitAfter: true }))
@@ -371,9 +398,10 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
                     if (pdfCount > 0) totalPdfsSecured += pdfCount;
                     if (boqCount > 0) totalBoqsSecured += boqCount;
 
-                    processedItem.isMultiTender = true;
-                    processedItem.baseTenderId = baseId;
-                    processedItem.relatedTenderIds = allWorkIds.filter(id => id !== workSummary.sourceTenderId);
+                    const isActuallyMulti = workRows.length > 1;
+                    processedItem.isMultiTender = isActuallyMulti;
+                    processedItem.baseTenderId = isActuallyMulti ? baseId : null;
+                    processedItem.relatedTenderIds = isActuallyMulti ? allWorkIds.filter(id => id !== workSummary.sourceTenderId) : [];
 
                     const saved = await this.saveTenderAndUploadR2(processedItem);
                     totalIngested++;
@@ -640,20 +668,35 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
         return isNaN(val) ? 0 : val;
       };
 
-      // 1. Critical Dates
+      // 1. Critical Dates with full minute precision
       const getDateByLabel = (labels) => {
         const normalizedLabels = (Array.isArray(labels) ? labels : [labels]).map(l => l.toLowerCase().replace(/[:₹\s]/g, ''));
         const tds = Array.from(document.querySelectorAll('td'));
         for (const td of tds) {
           if (td.querySelector('table')) continue;
-          const text = td.innerText.trim().toLowerCase().replace(/[:₹\s]/g, '');
+          const text = td.innerText.replace(/\u00A0/g, ' ').trim().toLowerCase().replace(/[:₹\s]/g, '');
           if (normalizedLabels.includes(text)) {
             let next = td.nextElementSibling;
             if (next && next.tagName === 'TD') {
-              const val = next.innerText.trim().replace(/\s+/g, ' ');
+              const val = next.innerText.replace(/\u00A0/g, ' ').trim().replace(/\s+/g, ' ');
               if (val && val !== 'NA' && val !== 'N/A' && /\d{1,2}[-/][a-zA-Z0-9]{2,4}[-/]\d{4}/.test(val)) {
                 return val;
               }
+            }
+          }
+        }
+
+        // Secondary fallback: regex scan across innermost Critical Dates table text
+        const critTable = Array.from(document.querySelectorAll('table')).find(t => t.innerText && t.innerText.includes('Critical Dates') && t.querySelectorAll('table').length === 0) ||
+                          Array.from(document.querySelectorAll('table')).find(t => t.innerText && t.innerText.includes('Critical Dates'));
+        if (critTable) {
+          const tableText = critTable.innerText.replace(/\u00A0/g, ' ');
+          for (const label of (Array.isArray(labels) ? labels : [labels])) {
+            const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const reg = new RegExp(escaped + '[\\s\\t:]*([0-9]{1,2}[-/][a-zA-Z0-9]{3}[-/][0-9]{4}(?:\\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\\s*(?:AM|PM)?)?)', 'i');
+            const match = tableText.match(reg);
+            if (match && match[1] && match[1] !== 'NA' && match[1] !== 'N/A') {
+              return match[1].trim().replace(/\s+/g, ' ');
             }
           }
         }
@@ -669,21 +712,27 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
       const critBidSubmissionStartDate = getDateByLabel(['Bid Submission Start Date']);
       const critBidSubmissionEndDate = getDateByLabel(['Bid Submission End Date']);
 
-      // Date Guard: Use list table's genuine publishedDateStr first, or detail page published date
-      let finalPublishedDateStr = summaryData?.publishedDateStr || critPublishedDate || critDocDownloadStartDate || critBidSubmissionStartDate || null;
+      // Date Guard: Use detail page official critical date, or listing table date
+      let finalPublishedDateStr = critPublishedDate || summaryData?.publishedDateStr || critDocDownloadStartDate || critBidSubmissionStartDate || null;
       const refStartDate = critDocDownloadStartDate || critBidSubmissionStartDate;
       if (finalPublishedDateStr && refStartDate) {
-        const parseD = (s) => {
+        const parseFullIST = (s) => {
           if (!s) return null;
-          const m = s.match(/(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})/);
+          const m = s.match(/(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
           if (!m) return null;
           const months = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
           const mo = months[m[2].toLowerCase()] ?? (parseInt(m[2], 10) - 1);
-          return new Date(parseInt(m[3], 10), mo, parseInt(m[1], 10));
+          let h = m[4] ? parseInt(m[4], 10) : 0;
+          const min = m[5] ? parseInt(m[5], 10) : 0;
+          const ampm = m[7] ? m[7].toUpperCase() : null;
+          if (ampm === 'PM' && h < 12) h += 12;
+          if (ampm === 'AM' && h === 12) h = 0;
+          return new Date(Date.UTC(parseInt(m[3], 10), mo, parseInt(m[1], 10), h, min));
         };
-        const pubD = parseD(finalPublishedDateStr);
-        const refD = parseD(refStartDate);
-        if (pubD && refD && pubD > refD && refD.getFullYear() === 2026) {
+        const pubD = parseFullIST(finalPublishedDateStr);
+        const refD = parseFullIST(refStartDate);
+        // If published date exceeds doc download or bid submission even by 1 minute, clamp to refStartDate
+        if (pubD && refD && pubD.getTime() > refD.getTime() && refD.getUTCFullYear() >= 2026) {
           finalPublishedDateStr = refStartDate;
         }
       }
@@ -1192,7 +1241,21 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
    * Saves or updates tender in MongoDB Atlas and uploads self-describing tender.json to Cloudflare R2.
    */
   async saveTenderAndUploadR2(item) {
-    const publishedDate = parseISTDate(item.publishedDateStr);
+    let publishedDate = parseISTDate(item.publishedDateStr);
+    let publishedDateStr = item.publishedDateStr;
+
+    // Invariant Lock: Published Date can NEVER exceed Document Download or Bid Submission Start Date
+    const docStart = parseISTDate(item.documentDownloadStartDateStr);
+    const bidStart = parseISTDate(item.bidSubmissionStartDateStr);
+    const refStart = (docStart && docStart.getFullYear() >= 2026) ? docStart : ((bidStart && bidStart.getFullYear() >= 2026) ? bidStart : null);
+    const refStartStr = (docStart && docStart.getFullYear() >= 2026) ? item.documentDownloadStartDateStr : ((bidStart && bidStart.getFullYear() >= 2026) ? item.bidSubmissionStartDateStr : null);
+
+    if (publishedDate && refStart && publishedDate.getTime() > refStart.getTime()) {
+      publishedDate = refStart;
+      publishedDateStr = refStartStr;
+      item.publishedDateStr = refStartStr;
+    }
+
     const deptCode = item.departmentCode || extractDeptCode(item.sourceTenderId, item.organisationChain);
     const folderKey = formatTenderStorageKey(item.sourceTenderId, publishedDate, deptCode);
 

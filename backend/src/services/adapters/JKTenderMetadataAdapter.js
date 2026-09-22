@@ -322,7 +322,19 @@ export class JKTenderMetadataAdapter {
    * @returns {Promise<Object>} Updated tender document
    */
   async updateTenderAndUploadR2(rawDetails, existingTender) {
-    const publishedDate = parseISTDate(rawDetails.publishedDateStr) || existingTender.publishedDate || null;
+    let publishedDate = parseISTDate(rawDetails.publishedDateStr) || existingTender.publishedDate || null;
+    let publishedDateStr = rawDetails.publishedDateStr || existingTender.publishedDateStr || null;
+
+    const docStart = parseISTDate(rawDetails.documentDownloadStartDateStr) || existingTender.documentDownloadStartDate;
+    const bidStart = parseISTDate(rawDetails.bidSubmissionStartDateStr) || existingTender.bidSubmissionStartDate;
+    const refStart = (docStart && docStart.getFullYear() >= 2026) ? docStart : ((bidStart && bidStart.getFullYear() >= 2026) ? bidStart : null);
+    const refStartStr = (docStart && docStart.getFullYear() >= 2026) ? (rawDetails.documentDownloadStartDateStr || existingTender.documentDownloadStartDateStr) : ((bidStart && bidStart.getFullYear() >= 2026) ? (rawDetails.bidSubmissionStartDateStr || existingTender.bidSubmissionStartDateStr) : null);
+
+    if (publishedDate && refStart && publishedDate.getTime() > refStart.getTime()) {
+      publishedDate = refStart;
+      publishedDateStr = refStartStr;
+    }
+
     const deptCode = existingTender.departmentCode || extractDeptCode(existingTender.sourceTenderId, rawDetails.organisationChain || existingTender.organisationChain);
     const deptName = rawDetails.organisationChain ? rawDetails.organisationChain.split('||')[0].trim() : (existingTender.departmentName || 'General');
     const folderKey = formatTenderStorageKey(existingTender.sourceTenderId, publishedDate, deptCode);
@@ -393,9 +405,9 @@ export class JKTenderMetadataAdapter {
 
       // --- Precise Critical Dates ---
       publishedDate,
-      publishedDateStr: rawDetails.publishedDateStr,
-      publishedTime: formatStandardTime(rawDetails.publishedDateStr || publishedDate),
-      publishedDateOnly: extractDateParts(rawDetails.publishedDateStr || publishedDate).dateOnly,
+      publishedDateStr,
+      publishedTime: formatStandardTime(publishedDateStr || publishedDate),
+      publishedDateOnly: extractDateParts(publishedDateStr || publishedDate).dateOnly,
 
       bidOpeningDate: parseISTDate(rawDetails.bidOpeningDateStr) || existingTender.bidOpeningDate,
       bidOpeningDateStr: rawDetails.bidOpeningDateStr,
