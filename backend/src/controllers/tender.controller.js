@@ -198,16 +198,46 @@ export const getTenderById = async (req, res, next) => {
     const { id } = req.params;
     let tender = null;
     if (mongoose.Types.ObjectId.isValid(id)) {
-      tender = await Tender.findById(id);
+      tender = await Tender.findById(id).lean();
     }
     if (!tender) {
-      tender = await Tender.findOne({ sourceTenderId: id });
+      tender = await Tender.findOne({ sourceTenderId: id }).lean();
     }
     
     // Handle case where record does not exist
     if (!tender) return res.status(404).json({ error: 'Tender not found' });
     
-    res.status(200).json(tender);
+    // Automatically discover and attach sibling tenders under the same NIT / reference
+    let relatedTenders = [];
+    const searchConditions = [];
+
+    if (tender.tenderReferenceNumber && tender.tenderReferenceNumber.trim() && tender.tenderReferenceNumber.trim() !== 'NA') {
+      searchConditions.push({ tenderReferenceNumber: tender.tenderReferenceNumber.trim() });
+    }
+    if (tender.baseTenderId && tender.baseTenderId.trim()) {
+      searchConditions.push({ baseTenderId: tender.baseTenderId.trim() });
+    }
+    if (Array.isArray(tender.relatedTenderIds) && tender.relatedTenderIds.length > 0) {
+      searchConditions.push({ sourceTenderId: { $in: tender.relatedTenderIds } });
+    }
+
+    if (searchConditions.length > 0) {
+      relatedTenders = await Tender.find({
+        _id: { $ne: tender._id },
+        $or: searchConditions
+      })
+      .select('sourceTenderId title estimatedValue publishedDate publishedDateStr closingDate status')
+      .sort({ sourceTenderId: 1 })
+      .lean();
+    }
+
+    const isMultiTender = tender.isMultiTender || relatedTenders.length > 0;
+
+    res.status(200).json({
+      ...tender,
+      isMultiTender,
+      relatedTenders
+    });
   } catch (error) {
     next(error);
   }

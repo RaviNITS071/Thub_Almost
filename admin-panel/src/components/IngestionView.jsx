@@ -34,6 +34,8 @@ export function IngestionView({ overview, syncHistory, onRefresh }) {
   const [isTriggeringAll, setIsTriggeringAll] = useState(false);
   const [isTriggeringLatest, setIsTriggeringLatest] = useState(false);
   const [isRetryingPdfs, setIsRetryingPdfs] = useState(false);
+  const [isFetchingPendingDocs, setIsFetchingPendingDocs] = useState(false);
+  const [pendingDocsStats, setPendingDocsStats] = useState({ totalPending: 0, readyToDownload: 0, downloaded: 0, upcoming: [] });
   const [isUpdatingSchedule, setIsUpdatingSchedule] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isResettingCp, setIsResettingCp] = useState(false);
@@ -55,7 +57,7 @@ export function IngestionView({ overview, syncHistory, onRefresh }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const terminalLogsRef = useRef(null);
 
-  // Poll live sync status
+  // Poll live sync status & pending docs overview
   const fetchLiveStatus = async () => {
     try {
       const data = await adminApi.getLiveSyncStatus();
@@ -65,10 +67,23 @@ export function IngestionView({ overview, syncHistory, onRefresh }) {
     }
   };
 
+  const fetchPendingDocsOverview = async () => {
+    try {
+      const data = await adminApi.getPendingDocsOverview();
+      if (data && data.success) {
+        setPendingDocsStats(data);
+      }
+    } catch (err) {}
+  };
+
   useEffect(() => {
     fetchLiveStatus();
+    fetchPendingDocsOverview();
     const intervalTime = liveStatus.isRunning ? 1500 : 5000;
-    const interval = setInterval(fetchLiveStatus, intervalTime);
+    const interval = setInterval(() => {
+      fetchLiveStatus();
+      if (!liveStatus.isRunning) fetchPendingDocsOverview();
+    }, intervalTime);
     return () => clearInterval(interval);
   }, [liveStatus.isRunning]);
 
@@ -175,6 +190,24 @@ export function IngestionView({ overview, syncHistory, onRefresh }) {
       setActionError(`PDF retry failed: ${err.message}`);
     } finally {
       setIsRetryingPdfs(false);
+    }
+  };
+
+  // 5b. Fetch Pending Documents (from pending_document_tenders collection)
+  const handleTriggerPendingDocs = async (all = false) => {
+    setIsFetchingPendingDocs(true);
+    setActionSuccess('');
+    setActionError('');
+    try {
+      const res = await adminApi.triggerPendingDocsFetch({ limit: 50, all });
+      setActionSuccess(res.message || 'Pending documents recovery crawl started in background.');
+      await fetchLiveStatus();
+      fetchPendingDocsOverview();
+      setTimeout(onRefresh, 2000);
+    } catch (err) {
+      setActionError(`Failed to start pending docs recovery: ${err.message}`);
+    } finally {
+      setIsFetchingPendingDocs(false);
     }
   };
 
@@ -375,42 +408,63 @@ export function IngestionView({ overview, syncHistory, onRefresh }) {
           </button>
         </div>
 
-        {/* SECTION 3: MISSING DOCUMENTS RADAR */}
+        {/* SECTION 3: UNPUBLISHED & PENDING DOCUMENTS RECOVERY */}
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl sm:rounded-3xl p-5 shadow-xs flex flex-col justify-between space-y-4">
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                DOCS RECOVERY
+                PENDING DOCS
               </span>
-              <FileQuestion className="w-4 h-4 text-saffronGold" />
+              <FileQuestion className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             </div>
 
             <h3 className="text-base font-bold font-display text-slate-900 dark:text-white">
-              {pendingMissingPdfs} Pending Document(s)
+              {pendingDocsStats.totalPending || pendingMissingPdfs} Pending Document(s)
             </h3>
             
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Tenders where PDF downloads were not yet available on the portal or timed out. Automatically retried every scheduled cycle.
+              Tenders where documents were not yet released on portal or download date was scheduled in the future.
             </p>
+
+            <div className="flex items-center gap-2 pt-1">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                ⚡ Ready Now: <b>{pendingDocsStats.readyToDownload}</b>
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-slate-600 dark:text-slate-400">
+                🕒 Future: <b>{Math.max(0, pendingDocsStats.totalPending - pendingDocsStats.readyToDownload)}</b>
+              </span>
+            </div>
           </div>
 
-          <button
-            onClick={handleRetryMissingPdfs}
-            disabled={isRetryingPdfs || pendingMissingPdfs === 0 || isRunning}
-            className="w-full py-2.5 px-4 rounded-xl bg-saffronGold hover:bg-amber-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
-          >
-            {isRetryingPdfs ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Recovering Documents...</span>
-              </>
-            ) : (
-              <>
-                <RotateCcw className="w-4 h-4" />
-                <span>Retry Missing Docs ({pendingMissingPdfs})</span>
-              </>
+          <div className="space-y-2 pt-1">
+            <button
+              onClick={() => handleTriggerPendingDocs(false)}
+              disabled={isFetchingPendingDocs || isRunning || (pendingDocsStats.readyToDownload === 0 && pendingDocsStats.totalPending === 0)}
+              className="w-full py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            >
+              {isFetchingPendingDocs ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Fetching Documents...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>Fetch Pending Documents ({pendingDocsStats.readyToDownload})</span>
+                </>
+              )}
+            </button>
+
+            {pendingDocsStats.totalPending > pendingDocsStats.readyToDownload && (
+              <button
+                onClick={() => handleTriggerPendingDocs(true)}
+                disabled={isFetchingPendingDocs || isRunning}
+                className="w-full text-center text-[11px] font-mono text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 py-1 transition-colors cursor-pointer"
+              >
+                Force check all pending ({pendingDocsStats.totalPending})
+              </button>
             )}
-          </button>
+          </div>
         </div>
 
         {/* SECTION 4: AUTOMATED SCHEDULE CYCLES (CRON) */}

@@ -114,7 +114,12 @@ export const formatTenderStorageKey = (tenderId, publishedDate, deptCodeOrOrg = 
     try {
       const parsed = parseISTDate(publishedDate);
       if (parsed && !isNaN(parsed.getTime())) {
-        dateStr = parsed.toISOString().split('T')[0];
+        dateStr = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(parsed);
       }
     } catch {
       dateStr = 'undated';

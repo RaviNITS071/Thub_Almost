@@ -4,6 +4,9 @@ const tenderSchema = new mongoose.Schema({
   // --- Core Identification ---
   sourcePortal: { type: String, required: true, default: 'JK_TENDERS' },
   sourceTenderId: { type: String, required: true, index: true }, // e.g. 2026_APD_321986_1
+  isMultiTender: { type: Boolean, default: false, index: true },
+  baseTenderId: { type: String, index: true }, // e.g. 2026_RDPR_325394
+  relatedTenderIds: [{ type: String }],       // Sibling sourceTenderIds under same NIT
   detailsUrl: { type: String },
 
   // --- Basic Details ---
@@ -151,5 +154,6 @@ tenderSchema.index({ organisationChain: 1, closingDate: 1 });
 tenderSchema.index({ status: 1, closingDate: 1 });
 tenderSchema.index({ pdfFetchStatus: 1, closingDate: 1 });
 tenderSchema.index({ publishedDate: -1, createdAt: -1 });
+tenderSchema.index({ tenderReferenceNumber: 1, sourceTenderId: 1 });
 
 export default mongoose.model('Tender', tenderSchema);

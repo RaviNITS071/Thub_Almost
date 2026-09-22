@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Building2, Calendar, FileText, FileSpreadsheet, IndianRupee, Heart, ExternalLink, AlertCircle, Download, Layers, CreditCard, MapPin, Map, Compass, Copy, Check, X, Info, FileClock, Eye, FolderArchive, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, Calendar, FileText, FileSpreadsheet, IndianRupee, Heart, ExternalLink, AlertCircle, Download, Layers, CreditCard, MapPin, Map, Compass, Copy, Check, X, Info, FileClock, Eye, FolderArchive, Loader2 } from 'lucide-react';
 import JSZip from 'jszip';
 
 import { useTender } from '@/hooks/useTenders';
@@ -268,6 +268,68 @@ export default function TenderDetails() {
             </div>
           </div>
         </div>
+
+        {/* Multi-Work Tenders Alert & Navigation */}
+        {tender.relatedTenders && tender.relatedTenders.length > 0 && (
+          <div className="bg-gradient-to-r from-amber-50/80 via-orange-50/60 to-amber-50/80 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 border border-amber-200 dark:border-amber-800/70 rounded-2xl p-4 sm:p-5 shadow-xs mb-6">
+            <div className="flex items-start gap-3 sm:gap-3.5">
+              <div className="p-2.5 bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 rounded-xl shrink-0 mt-0.5 shadow-xs">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                      Multiple Works Detected for this NIT
+                    </h3>
+                    <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-900/80 px-2 py-0.5 rounded-full">
+                      {tender.relatedTenders.length + 1} Total Works
+                    </span>
+                  </div>
+                  {(tender.tenderReferenceNumber || tender.baseTenderId) && (
+                    <span className="text-xs font-mono font-semibold text-slate-700 dark:text-slate-300 bg-white/90 dark:bg-slate-800/90 px-2.5 py-0.5 rounded border border-amber-200 dark:border-amber-700/80">
+                      Ref: {tender.tenderReferenceNumber || tender.baseTenderId}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 mb-3.5">
+                  This tender is part of a multi-work contract notice issued by the department. Each work item has its own distinct scope, BOQ, and estimated budget. Explore the other works under this notice below:
+                </p>
+
+                {/* Sibling Works Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {tender.relatedTenders.map((sibling) => (
+                    <div 
+                      key={sibling._id || sibling.sourceTenderId}
+                      onClick={() => navigate(`/tenders/${sibling._id || sibling.sourceTenderId}`)}
+                      className="group/work flex flex-col justify-between p-3.5 bg-white dark:bg-slate-800/90 border border-amber-200/80 dark:border-slate-700 rounded-xl hover:border-dalBlue dark:hover:border-blue-400 hover:shadow-sm transition-all cursor-pointer"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="font-mono text-xs font-bold text-dalBlue dark:text-blue-300 group-hover/work:underline">
+                            {sibling.sourceTenderId}
+                          </span>
+                          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50">
+                            {sibling.estimatedValue ? formatCurrencyINR(sibling.estimatedValue) : 'Value N/A'}
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200 line-clamp-2 leading-relaxed">
+                          {sibling.title}
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-3 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+                        <span>Pub: {formatDateDisplay(sibling.publishedDate || sibling.publishedDateStr)}</span>
+                        <span className="flex items-center gap-1 text-xs font-bold text-dalBlue dark:text-blue-400 group-hover/work:translate-x-0.5 transition-transform">
+                          View Work <ArrowRight className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Content Columns */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

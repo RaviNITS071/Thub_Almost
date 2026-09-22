@@ -113,15 +113,17 @@ async function main() {
     const elapsedMinutes = (elapsedSeconds / 60).toFixed(1);
 
     console.log(`\n======================================================================`);
-    console.log(`🏁 INGESTION SUMMARY: ${dateConfig.displayString}`);
+    console.log(`🏁 INGESTION & DOCUMENT METRICS: ${dateConfig.displayString}`);
     console.log(`======================================================================`);
     console.log(`⏱️ Duration:                          ${elapsedSeconds}s (~${elapsedMinutes} min)`);
+    console.log(`🔐 Captchas Encountered / Solved:     ${summary.totalCaptchaAttempts || 0} attempts (${summary.totalCaptchaSuccess || 0} solved)`);
     console.log(`📋 Total Inspected Across Portal:     ${summary.totalInspected}`);
     console.log(`🎯 Total Matching Published Date:     ${summary.totalTargetDateFound}`);
-    console.log(`✅ Newly Stored to MongoDB Atlas:     ${summary.totalIngested}`);
-    console.log(`⏩ Skipped (Already Complete in DB):  ${summary.totalSkippedAlreadyComplete}`);
+    console.log(`✅ Tenders WITH Documents Secured:    ${summary.totalWithDocuments || 0}`);
+    console.log(`⏳ Tenders WITHOUT Documents Yet:     ${summary.totalWithoutDocuments || 0} (Stored in pending_document_tenders)`);
     console.log(`📄 NIT PDFs Secured to R2:            ${summary.totalPdfsSecured}`);
     console.log(`📦 BOQ ZIPs Secured to R2:            ${summary.totalBoqsSecured}`);
+    console.log(`⏩ Skipped (Already Complete in DB):  ${summary.totalSkippedAlreadyComplete}`);
     console.log(`======================================================================\n`);
 
     // Send Telegram finished notification (if configured)

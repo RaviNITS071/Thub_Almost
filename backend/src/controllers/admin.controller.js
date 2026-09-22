@@ -14,6 +14,7 @@ import SystemLog from '../models/SystemLog.js';
 import SyncJob from '../models/SyncJob.js';
 import CronConfig from '../models/CronConfig.js';
 import Tender from '../models/Tender.js';
+import PendingDocumentTender from '../models/PendingDocumentTender.js';
 
 /**
  * Validate admin credentials
@@ -530,6 +531,107 @@ export const triggerMirrorSync = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ error: 'Mirror synchronization failed', message: err.message });
+  }
+};
+
+/**
+ * Get overview metrics for pending document tenders
+ */
+export const getPendingDocsOverview = async (req, res) => {
+  try {
+    const now = new Date();
+    const totalPending = await PendingDocumentTender.countDocuments({ status: { $ne: 'DOWNLOADED' } });
+    const readyToDownload = await PendingDocumentTender.countDocuments({
+      status: { $in: ['AWAITING_DOWNLOAD_DATE', 'READY_TO_DOWNLOAD'] },
+      $or: [
+        { documentDownloadStartDate: { $lte: now } },
+        { documentDownloadStartDate: null },
+        { status: 'READY_TO_DOWNLOAD' }
+      ]
+    });
+    const downloaded = await PendingDocumentTender.countDocuments({ status: 'DOWNLOADED' });
+    const upcoming = await PendingDocumentTender.find({
+      status: 'AWAITING_DOWNLOAD_DATE',
+      documentDownloadStartDate: { $gt: now }
+    })
+    .sort({ documentDownloadStartDate: 1 })
+    .limit(10)
+    .lean();
+
+    return res.status(200).json({
+      success: true,
+      totalPending,
+      readyToDownload,
+      downloaded,
+      upcoming
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to get pending docs overview', message: err.message });
+  }
+};
+
+/**
+ * Trigger background worker to fetch documents for pending document tenders
+ */
+export const triggerPendingDocsFetch = async (req, res) => {
+  try {
+    const { limit = 50, all = false } = req.body || {};
+
+    if (activeCrawlerProcess) {
+      return res.status(400).json({
+        error: 'Another crawl or sync process is already actively running.'
+      });
+    }
+
+    const scriptPath = path.join(process.cwd(), 'src/scripts/fetchPendingDocTenders.js');
+    const args = [scriptPath, '--limit', String(limit)];
+    if (all) args.push('--all');
+
+    const child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, SCRAPER_HEADLESS: process.env.SCRAPER_HEADLESS || 'true' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    activeCrawlerProcess = child;
+
+    child.stdout.on('data', async (data) => {
+      const text = data.toString().trim();
+      if (!text) return;
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (line.includes('✅') || line.includes('🎉') || line.includes('🏛️') || line.includes('👉') || line.includes('⏳') || line.includes('🚀') || line.includes('🏁') || line.includes('📋') || line.includes('🔐')) {
+          await SystemLog.create({
+            level: 'INFO',
+            source: 'WORKER_SCRAPER',
+            message: line
+          }).catch(() => {});
+        }
+      }
+    });
+
+    child.stderr.on('data', async (data) => {
+      const text = data.toString().trim();
+      if (text) {
+        await SystemLog.create({
+          level: 'WARN',
+          source: 'WORKER_SCRAPER',
+          message: text.substring(0, 300)
+        }).catch(() => {});
+      }
+    });
+
+    child.on('close', () => {
+      activeCrawlerProcess = null;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Pending documents recovery crawl started in background.',
+      pid: child.pid
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to dispatch pending docs recovery', message: err.message });
   }
 };
 

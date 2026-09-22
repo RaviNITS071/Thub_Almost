@@ -75,6 +75,12 @@ export const adminApi = {
   stopActiveSync: () => request('/sync/stop', { method: 'POST' }),
   resetCrawlCheckpoint: () => request('/sync/checkpoint/reset', { method: 'POST' }),
   triggerMissingPdfRecovery: () => request('/sync/retry-missing-pdfs', { method: 'POST' }),
+  getPendingDocsOverview: () => request('/pending-docs/overview'),
+  triggerPendingDocsFetch: (options = {}) => 
+    request('/pending-docs/fetch', { 
+      method: 'POST', 
+      body: JSON.stringify(options) 
+    }),
   updateScheduleConfig: (isAutomatedSyncEnabled) => 
     request('/sync/schedule-config', {
       method: 'POST',

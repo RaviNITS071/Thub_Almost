@@ -28,6 +28,8 @@ import {
   downloadDeploymentGuide,
   downloadFutureConfigGuide,
   triggerMirrorSync,
+  getPendingDocsOverview,
+  triggerPendingDocsFetch,
 } from '../controllers/admin.controller.js';
 
 const router = express.Router();
@@ -59,6 +61,10 @@ router.post('/sync/stop', stopActiveSync);
 router.post('/sync/checkpoint/reset', resetCrawlCheckpoint);
 router.post('/sync/retry-missing-pdfs', triggerMissingPdfRecovery);
 router.post('/sync/schedule-config', updateScheduleConfig);
+
+// 6b. Pending Unpublished Documents Management
+router.get('/pending-docs/overview', getPendingDocsOverview);
+router.post('/pending-docs/fetch', triggerPendingDocsFetch);
 
 // 7. Maintenance & Archive Purge
 router.post('/maintenance/purge-archive', purgeExpiredArchive);
