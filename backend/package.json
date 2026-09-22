@@ -26,7 +26,9 @@
     "manual:pdf": "node src/scripts/generateDisasterRecoveryPdf.js",
     "manual:disaster": "node src/scripts/generateDisasterRecoveryPdf.js",
     "manual:deployment": "node src/scripts/generateDeploymentPdf.js",
-    "manuals:all": "node src/scripts/generateDisasterRecoveryPdf.js && node src/scripts/generateDeploymentPdf.js",
+    "manual:future": "node src/scripts/generateFutureConfigPdf.js",
+    "report:pdf": "node src/scripts/generateCrawlReportPdf.js",
+    "manuals:all": "node src/scripts/generateDisasterRecoveryPdf.js && node src/scripts/generateDeploymentPdf.js && node src/scripts/generateFutureConfigPdf.js && node src/scripts/generateCrawlReportPdf.js",
     "sync:mirror": "node src/scripts/syncR2Mirror.js"
   },
   "keywords": [],
