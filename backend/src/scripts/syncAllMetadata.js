@@ -165,6 +165,9 @@ async function run() {
               index,
               sourceTenderId: tenderId,
               title: a ? a.innerText.trim() : tds[4].innerText.trim(),
+              publishedDate: tds[1] ? tds[1].innerText.trim() : '',
+              closingDate: tds[2] ? tds[2].innerText.trim() : '',
+              openingDate: tds[3] ? tds[3].innerText.trim() : '',
               hasLink: !!a
             };
           }).filter(t => t && t.hasLink && t.sourceTenderId);

@@ -227,8 +227,24 @@ export class JKTenderMetadataAdapter {
       if (!invitingAuthorityName) invitingAuthorityName = getTableVal('Name');
       if (!invitingAuthorityAddress) invitingAuthorityAddress = getTableVal('Address');
 
-      // Fallback: publishedDate defaults to docDownloadStartDate or bidSubmissionStartDate if portal omitted Published Date cell
-      const finalPublishedDateStr = critPublishedDate || critDocDownloadStartDate || critBidSubmissionStartDate || summaryData?.publishedDate || null;
+      // Fallback & Sanity Guard: Published Date in NIC portals cannot be later than Document Download / Bid Submission Start Date
+      let finalPublishedDateStr = critPublishedDate || summaryData?.publishedDate || critDocDownloadStartDate || critBidSubmissionStartDate || null;
+      const referenceStartDate = critDocDownloadStartDate || critBidSubmissionStartDate;
+      if (finalPublishedDateStr && referenceStartDate) {
+        const parseD = (s) => {
+          if (!s) return null;
+          const m = s.match(/(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})/);
+          if (!m) return null;
+          const months = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+          const mo = months[m[2].toLowerCase()] ?? (parseInt(m[2], 10) - 1);
+          return new Date(parseInt(m[3], 10), mo, parseInt(m[1], 10));
+        };
+        const pubD = parseD(finalPublishedDateStr);
+        const refD = parseD(referenceStartDate);
+        if (pubD && refD && pubD > refD && refD.getFullYear() === 2026) {
+          finalPublishedDateStr = referenceStartDate;
+        }
+      }
       const finalClosingDateStr = critBidSubmissionEndDate || critDocDownloadEndDate || summaryData?.closingDate || null;
 
       return {
