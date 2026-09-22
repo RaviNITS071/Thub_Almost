@@ -54,6 +54,9 @@ export const getTenders = async (req, res, next) => {
         { workDescription: { $regex: escapedSearch, $options: 'i' } },
         { tenderReferenceNumber: { $regex: escapedSearch, $options: 'i' } },
         { sourceTenderId: { $regex: escapedSearch, $options: 'i' } },
+        { organisationChain: { $regex: escapedSearch, $options: 'i' } },
+        { departmentName: { $regex: escapedSearch, $options: 'i' } },
+        { location: { $regex: escapedSearch, $options: 'i' } },
         { productCategory: { $regex: escapedSearch, $options: 'i' } },
         { tenderCategory: { $regex: escapedSearch, $options: 'i' } }
       ];

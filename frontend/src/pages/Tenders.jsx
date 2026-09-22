@@ -70,9 +70,26 @@ const CATEGORY_OPTIONS = [
 
 const AUTHORITY_OPTIONS = [
   { label: 'All Government Authorities', value: '' },
-  { label: 'Agriculture Production Department', value: 'AGRICULTURE PRODUCTION DEPARTMENT' },
+  { label: 'Rural Development & Panchayati Raj', value: 'Rural Development' },
+  { label: 'Public Works Department (PWD)', value: 'PWD' },
+  { label: 'Housing & Urban Development (HAUDD)', value: 'HAUDD' },
+  { label: 'Irrigation & Flood Control (I and FC)', value: 'I and FC' },
   { label: 'Power Development Dept (DC-PDD)', value: 'DC-PDD' },
-  { label: 'Animal & Sheep Husbandry (ASH)', value: 'ASH' },
+  { label: 'Jal Shakti / PHE Department', value: 'PHE' },
+  { label: 'Forest Department', value: 'FOREST DEPARTMENT' },
+  { label: 'Health & Medical Education', value: 'Health and Medical Education' },
+  { label: 'Soil & Water Conservation Dept', value: 'Soil and Water Conservation' },
+  { label: 'Power Development Corp (JKSPDC)', value: 'JKSPDC' },
+  { label: 'Universities & Higher Education', value: 'University Department' },
+  { label: 'SKUAST Agriculture University', value: 'SKUAST' },
+  { label: 'Police Headquarters (DGP-JK)', value: 'DGP-JK' },
+  { label: 'Forest Development Corp (JKSFC)', value: 'JKSFC' },
+  { label: 'Shri Mata Vaishno Devi Shrine Board', value: 'SHRI MATA VAISHNO DEVI' },
+  { label: 'Tourism Department', value: 'Tourism' },
+  { label: 'Agriculture Production Department', value: 'AGRICULTURE PRODUCTION' },
+  { label: 'Industries & Commerce (SICOP)', value: 'SICOP' },
+  { label: 'J&K Sports Council', value: 'Sports Council' },
+  { label: 'Horticulture Production Dept', value: 'Horticulture' },
 ];
 
 const DIVISION_OPTIONS = [

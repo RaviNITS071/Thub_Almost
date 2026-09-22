@@ -820,6 +820,39 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
         }
       }
 
+      // 3b. Other Important Documents List (Mandatory Bidder Checklist)
+      const otherImportantDocuments = [];
+      const oidTable = allTables.find(t => 
+        t.innerText && 
+        (t.innerText.includes('Other Important Documents') || t.innerText.includes('Other Important Documents List')) &&
+        t.innerText.includes('Sub Category')
+      );
+      if (oidTable) {
+        const rows = Array.from(oidTable.querySelectorAll('tr'));
+        for (const tr of rows) {
+          if (tr.querySelector('th') || (tr.textContent.includes('Sub Category') && tr.textContent.includes('Category'))) {
+            continue;
+          }
+          const tds = Array.from(tr.querySelectorAll('td'));
+          if (tds.length >= 4) {
+            const sNo = parseInt(tds[0].innerText.trim(), 10);
+            const category = tds[1].innerText.trim().replace(/\s+/g, ' ');
+            const subCategory = tds[2].innerText.trim().replace(/\s+/g, ' ');
+            const description = tds[3].innerText.trim().replace(/\s+/g, ' ');
+            const format = tds[4] ? tds[4].innerText.trim().replace(/\s+/g, ' ') : '';
+            if (!isNaN(sNo) && (category || subCategory)) {
+              otherImportantDocuments.push({
+                sNo,
+                category,
+                subCategory,
+                description,
+                format
+              });
+            }
+          }
+        }
+      }
+
       // 4. NIT Documents metadata
       const rawNitDocs = [];
       const nitTable = allTables.find(tbl => tbl.querySelectorAll('table').length === 0 && tbl.innerText.includes('Document Name') && tbl.innerText.includes('Document Size'));
@@ -933,6 +966,7 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
 
         offlineInstruments,
         coversInfo,
+        otherImportantDocuments,
         workItemDocuments,
         rawNitDocs,
         invitingAuthorityName,
@@ -1373,6 +1407,7 @@ export class JKTenderDateAdapter extends TenderSourceAdapter {
 
       offlineInstruments: item.offlineInstruments || [],
       coversInfo: item.coversInfo || [],
+      otherImportantDocuments: item.otherImportantDocuments || [],
       nitDocuments: item.nitDocuments || [],
       workItemDocuments: item.workItemDocuments || [],
       pdfUrls: item.pdfUrls || [],

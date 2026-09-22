@@ -40,6 +40,15 @@ const tenderSchema = new mongoose.Schema({
     documentType: { type: String }
   }],
 
+  // --- Other Important Documents List (Mandatory Bidder Checklist) ---
+  otherImportantDocuments: [{
+    sNo: { type: Number },
+    category: { type: String },
+    subCategory: { type: String },
+    description: { type: String },
+    format: { type: String }
+  }],
+
   // --- Fee & EMD Details ---
   tenderFee: { type: Number, default: 0 },
   feePayableTo: { type: String },

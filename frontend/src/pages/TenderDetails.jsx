@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Building2, Calendar, FileText, FileSpreadsheet, IndianRupee, Heart, ExternalLink, AlertCircle, Download, Layers, CreditCard, MapPin, Map, Compass, Copy, Check, X, Info, FileClock, Eye, FolderArchive, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, Calendar, FileText, FileSpreadsheet, IndianRupee, Heart, ExternalLink, AlertCircle, Download, Layers, CreditCard, MapPin, Map, Compass, Copy, Check, X, Info, FileClock, Eye, FolderArchive, Loader2, FileCheck } from 'lucide-react';
 import JSZip from 'jszip';
 
 import { useTender } from '@/hooks/useTenders';
@@ -529,6 +529,44 @@ export default function TenderDetails() {
                 )}
               </section>
             </div>
+
+            {/* Other Important Documents List (Mandatory Bidder Checklist) */}
+            {tender.otherImportantDocuments && tender.otherImportantDocuments.length > 0 && (
+              <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-5 shadow-xs">
+                <h3 className="text-sm font-bold font-display text-slate-900 dark:text-white mb-3 border-b border-slate-100 dark:border-slate-700 pb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FileCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" /> Other Important Documents List
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    {tender.otherImportantDocuments.length} Mandatory Document(s)
+                  </span>
+                </h3>
+                <div className="overflow-x-auto filter-scrollbar -mx-1 px-1">
+                  <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300 min-w-[500px]">
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-[10px] uppercase text-slate-500 border-y border-slate-100 dark:border-slate-700">
+                      <tr>
+                        <th className="px-2.5 py-1.5 w-12">S.No</th>
+                        <th className="px-2.5 py-1.5 w-36">Category</th>
+                        <th className="px-2.5 py-1.5 w-48">Sub Category</th>
+                        <th className="px-2.5 py-1.5">Sub Category Description</th>
+                        <th className="px-2.5 py-1.5 w-24">Format/File</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tender.otherImportantDocuments.map((doc, idx) => (
+                        <tr key={idx} className="border-b border-slate-100 dark:border-slate-700/60 hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                          <td className="px-2.5 py-2 font-mono font-bold text-slate-900 dark:text-white">{doc.sNo || idx + 1}</td>
+                          <td className="px-2.5 py-2 font-medium">{doc.category}</td>
+                          <td className="px-2.5 py-2 font-semibold text-slate-900 dark:text-white">{doc.subCategory}</td>
+                          <td className="px-2.5 py-2 text-slate-600 dark:text-slate-300 font-normal leading-relaxed">{doc.description}</td>
+                          <td className="px-2.5 py-2 font-mono text-[11px] text-slate-500">{doc.format || 'N/A'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
             
             {/* Work Item Details */}
             <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-6 shadow-xs">
