@@ -3,17 +3,16 @@
  * @description Distributed CLI runner for 100% accurate metadata enrichment and Cloudflare R2 JSON syncing.
  * 
  * Features:
- * - Instant Pre-Screening: Detects expired tenders via list row or DB and skips in < 0.1s.
- * - Fast-Track 2-Second Timeout: Never waits 30 seconds on missing or closed tenders.
- * - Resilient Page Recovery: Automatically detects if the portal lost the list page and recovers.
- * - Multi-Page Stepping: Can resume to any page number (even page 30, 50+) via smart pagination.
- * - Continuous Checkpointing: Resumes seamlessly from the exact organisation, page, and tender.
+ * - Full Load Verification: Ensures the list table and details page are 100% fully rendered before checking/skipping.
+ * - Confirmed Expired Skip: Only skips a tender once the portal is fully loaded and confirms the tender is closed/absent.
+ * - Resilient Page Recovery: Automatically detects if the portal lost the list page and recovers back to the view.
+ * - Multi-Page Stepping: Jumps cleanly past page 1 to any high page number (e.g. 20, 35, 50).
+ * - Continuous Checkpointing: Remembers exact organisation, page number, and last tender ID.
  * 
  * Usage:
  *   node src/scripts/syncAllMetadata.js                           # Enrich all active tenders
  *   node src/scripts/syncAllMetadata.js --org "Rural Development" # Only Rural Development
  *   node src/scripts/syncAllMetadata.js --exclude-org "Rural Development" # Everything except RDD
- *   node src/scripts/syncAllMetadata.js --only-anomalies         # Fast-track only tenders with date anomalies
  *   node src/scripts/syncAllMetadata.js --reset                  # Reset checkpoint and start fresh
  */
 
@@ -23,8 +22,6 @@ import path from 'path';
 import { connectDB, closeDB } from '../config/db.js';
 import Tender from '../models/Tender.js';
 import JKTenderMetadataAdapter from '../services/adapters/JKTenderMetadataAdapter.js';
-import { telegramService } from '../services/telegram.service.js';
-import { parseISTDate } from '../utils/dateUtils.js';
 
 const CHECKPOINT_FILE = path.join(process.cwd(), '.metadata_sync_checkpoint.json');
 
@@ -51,14 +48,14 @@ function clearCheckpoint() {
 }
 
 /**
- * Smart fast-forward helper to advance past page 1 to any target page (e.g. 25, 49)
+ * Fast-forward helper to advance past page 1 to any target page (e.g. 25, 49)
  * stepping through pagination blocks as needed.
  */
 async function fastForwardToPage(page, targetPage) {
   if (targetPage <= 1) return;
   console.log(`⏩ Fast-forwarding to page ${targetPage}...`);
 
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 35; attempt++) {
     // 1. Check if target page number is directly clickable
     const targetLink = page.locator(`a`).filter({ hasText: new RegExp(`^${targetPage}$`) }).first();
     if (await targetLink.count() > 0) {
@@ -66,20 +63,21 @@ async function fastForwardToPage(page, targetPage) {
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
         targetLink.click()
       ]);
-      await page.waitForTimeout(1000);
+      await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(800);
       return;
     }
 
-    // 2. Otherwise find the highest visible page number link or "Next >"
+    // 2. Otherwise find the "Next >" link
     const nextBtn = page.locator("a:has-text('Next >'), a:has-text('Next'), a#DirectLink_1").first();
     if (await nextBtn.count() > 0) {
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
         nextBtn.click()
       ]);
-      await page.waitForTimeout(1000);
+      await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(800);
 
-      // Check current page number
       const curPageText = await page.evaluate(() => {
         const cur = document.querySelector('span.current, font[color="red"], b');
         return cur ? cur.innerText.trim() : '';
@@ -98,7 +96,6 @@ async function run() {
   const startTime = Date.now();
   const args = process.argv.slice(2);
   const isReset = args.some(a => a === '--reset' || a === '--fresh');
-  const onlyAnomalies = args.some(a => a === '--only-anomalies');
   const numericArg = args.find(a => /^\d+$/.test(a));
   const limit = numericArg ? parseInt(numericArg, 10) : 50000;
 
@@ -117,15 +114,14 @@ async function run() {
   const checkpoint = isReset ? null : loadCheckpoint();
 
   console.log(`\n======================================================================`);
-  console.log(`🚀 JKTENDERS METADATA & R2 JSON ENRICHMENT ENGINE (FAST-TRACK)`);
+  console.log(`🚀 JKTENDERS METADATA & R2 JSON ENRICHMENT ENGINE`);
   console.log(`======================================================================`);
   console.log(`📌 Target Limit: ${limit === 50000 ? 'UNLIMITED (All Tenders)' : limit}`);
   if (orgFilter) console.log(`🎯 [FILTER] Only processing organisations matching: "${orgFilter}"`);
   if (excludeOrgFilter) console.log(`🚫 [EXCLUDE] Excluding organisations matching: "${excludeOrgFilter}"`);
-  if (onlyAnomalies) console.log(`⚡ [MODE] Fast-track: Only enriching tenders with date anomalies`);
   if (checkpoint) {
     console.log(`🔄 [RESUME] Resuming from Org: "${checkpoint.orgName}" (Index: ${checkpoint.orgIndex + 1}, Page: ${checkpoint.orgPageNum})`);
-    console.log(`   Previously Processed: ${checkpoint.totalUpdated || 0} tenders`);
+    console.log(`   Previously Processed: ${checkpoint.totalUpdated || 0} tenders, Skipped: ${checkpoint.totalSkipped || 0}`);
   }
   console.log(`======================================================================\n`);
 
@@ -138,20 +134,20 @@ async function run() {
   let totalR2Json = checkpoint?.totalUpdated || 0;
   let lastCheckpointState = null;
 
-  // Handle graceful interrupts
+  // Handle graceful interrupts (Ctrl+C / SIGINT / SIGTERM)
   const handleInterrupt = async (signal) => {
-    console.log(`\n⚠️ [${signal}] Interrupt received. Saving checkpoint...`);
+    console.log(`\n⚠️ [${signal}] Interrupt received. Saving checkpoint safely...`);
     if (lastCheckpointState) saveCheckpoint(lastCheckpointState);
     await adapter.closeBrowser().catch(() => {});
     await closeDB().catch(() => {});
-    console.log(`💾 Checkpoint saved safely. You can resume anytime!`);
+    console.log(`💾 Checkpoint saved. Run again to resume from the exact same point.`);
     process.exit(0);
   };
   process.once('SIGINT', () => handleInterrupt('SIGINT'));
   process.once('SIGTERM', () => handleInterrupt('SIGTERM'));
 
   try {
-    console.log(`🌐 Navigating to FrontEndTendersByOrganisation...`);
+    console.log(`🌐 Navigating to FrontEndTendersByOrganisation on JKTenders...`);
     await page.goto(`${adapter.baseUrl}/nicgep/app?page=FrontEndTendersByOrganisation&service=page`, {
       waitUntil: 'domcontentloaded',
       timeout: 60000
@@ -178,7 +174,6 @@ async function run() {
     for (let o = startOrgIndex; o < orgRows.length && totalUpdated < limit; o++) {
       const org = orgRows[o];
 
-      // Check filters
       if (orgFilter && !org.orgName.toLowerCase().includes(orgFilter.toLowerCase())) continue;
       if (excludeOrgFilter) {
         const excludes = excludeOrgFilter.split(',').map(e => e.trim().toLowerCase());
@@ -189,7 +184,6 @@ async function run() {
       console.log(`🏛️ [${o + 1}/${orgRows.length}] Organisation: "${org.orgName}" (${org.tenderCount} active tenders)`);
       console.log(`======================================================================`);
 
-      // Click organisation count link
       const orgRow = page.locator("table#table tr[id^='informal']").filter({ hasText: org.orgName }).first();
       const countLink = orgRow.locator("td:nth-child(3) a, a.link2, a").first();
       await Promise.all([
@@ -200,14 +194,15 @@ async function run() {
 
       let orgPageNum = (o === startOrgIndex && startPageNum > 1) ? startPageNum : 1;
 
-      // If resuming to page > 1, use smart stepping
       if (orgPageNum > 1) {
         await fastForwardToPage(page, orgPageNum);
       }
 
       let orgHasMore = true;
       while (orgHasMore && totalUpdated < limit) {
-        await page.waitForSelector("table.list_table tr[id^='informal']", { timeout: 25000 }).catch(() => {});
+        // 1. ENSURE LIST TABLE DATA IS FULLY LOADED ON THE PORTAL
+        await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 30000 }).catch(() => {});
+        await page.waitForTimeout(500);
 
         const tenderRows = await page.evaluate(() => {
           const rows = Array.from(document.querySelectorAll("table.list_table tr[id^='informal']"));
@@ -222,9 +217,6 @@ async function run() {
               index,
               sourceTenderId: tenderId,
               title: a ? a.innerText.trim() : tds[4].innerText.trim(),
-              publishedDate: tds[1] ? tds[1].innerText.trim() : '',
-              closingDate: tds[2] ? tds[2].innerText.trim() : '',
-              openingDate: tds[3] ? tds[3].innerText.trim() : '',
               hasLink: !!a
             };
           }).filter(t => t && t.hasLink);
@@ -239,17 +231,15 @@ async function run() {
           // If resuming on the same page, skip already processed tenders
           if (checkpoint && o === startOrgIndex && orgPageNum === startPageNum && checkpoint.lastTenderId) {
             if (summary.sourceTenderId === checkpoint.lastTenderId) {
-              checkpoint.lastTenderId = null; // Resume from the next tender!
+              checkpoint.lastTenderId = null; // Found last processed, resume next!
               continue;
             }
             if (checkpoint.lastTenderId !== null) {
-              continue; // Skip prior tenders on this page
+              continue; // Skip prior tenders
             }
           }
 
-          const now = new Date();
-
-          // 1. Check if tender exists in MongoDB
+          // Check if tender exists in MongoDB
           const existing = await Tender.findOne({
             sourcePortal: 'JK_TENDERS',
             sourceTenderId: summary.sourceTenderId
@@ -260,69 +250,51 @@ async function run() {
             continue;
           }
 
-          // 2. FAST-TRACK EXPIRY PRE-SCREENING (Zero-Second Skip)
-          const closingDateOnPortal = summary.closingDate ? parseISTDate(summary.closingDate) : null;
-          const isExpiredOnPortal = closingDateOnPortal && closingDateOnPortal < now;
-          const isExpiredInDb = existing.status === 'EXPIRED' || (existing.closingDate && new Date(existing.closingDate) < now);
-
-          if (isExpiredOnPortal || isExpiredInDb) {
-            if (existing.status !== 'EXPIRED') {
-              await Tender.updateOne(
-                { _id: existing._id },
-                { $set: { status: 'EXPIRED', updatedAt: now } }
-              ).catch(() => {});
-            }
-            console.log(`⏰ [EXPIRED - SKIPPED IN 0s] ${summary.sourceTenderId} closing date passed (${summary.closingDate || existing.closingDateStr}). Marked EXPIRED in DB.`);
-            totalSkipped++;
-
-            // Update checkpoint
-            lastCheckpointState = {
-              orgIndex: o,
-              orgName: org.orgName,
-              orgPageNum,
-              lastTenderId: summary.sourceTenderId,
-              totalUpdated,
-              totalSkipped,
-              status: 'IN_PROGRESS',
-              updatedAt: new Date().toISOString()
-            };
-            saveCheckpoint(lastCheckpointState);
-            continue;
+          // 2. VERIFY THAT THE PORTAL LIST TABLE IS FULLY LOADED BEFORE CHECKING
+          const tableRowsCount = await page.locator("table.list_table tr[id^='informal']").count();
+          if (tableRowsCount === 0) {
+            console.log(`   ⏳ Portal table rendering delayed. Waiting for data to fully load...`);
+            await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 25000 }).catch(() => {});
+            await page.waitForTimeout(600);
           }
 
-          // If --only-anomalies mode, check if this tender actually has an anomaly
-          if (onlyAnomalies) {
-            const isAnomaly = !existing.publishedDateStr ||
-              (existing.createdAt && Math.abs(new Date(existing.publishedDate).getTime() - new Date(existing.createdAt).getTime()) < 15 * 60 * 1000) ||
-              (existing.closingDate && existing.publishedDate && new Date(existing.closingDate) < new Date(existing.publishedDate));
-
-            if (!isAnomaly) {
-              totalSkipped++;
-              continue;
-            }
-          }
-
-          console.log(`\n👉 [${totalUpdated + 1}] Enriching: ${summary.sourceTenderId}`);
+          console.log(`\n👉 [${totalUpdated + 1}] Checking Portal: ${summary.sourceTenderId}`);
 
           try {
-            // 3. FAST 2-SECOND LOCATOR CHECK
+            // Find tender link on fully loaded list table
             const tenderRowLocator = page.locator("table.list_table tr[id^='informal']").filter({ hasText: summary.sourceTenderId });
             const tenderLink = tenderRowLocator.locator("td:nth-child(5) a, a").first();
 
-            // Wait at most 2 seconds for link visibility
-            try {
-              await tenderLink.waitFor({ state: 'visible', timeout: 2000 });
-            } catch (timeoutErr) {
-              console.log(`⏩ [SKIPPED IN 2s] ${summary.sourceTenderId} not clickable on current list view.`);
+            // Check if link is visible on the loaded page
+            const isVisible = await tenderLink.isVisible().catch(() => false);
+            if (!isVisible) {
+              // Only skip after confirming data is fully loaded and tender has no active link
+              console.log(`   ⏩ [EXPIRED / NO LINK ON PORTAL - SKIPPED] ${summary.sourceTenderId}`);
               totalSkipped++;
+
+              // Update checkpoint so progress moves forward
+              lastCheckpointState = {
+                orgIndex: o,
+                orgName: org.orgName,
+                orgPageNum,
+                lastTenderId: summary.sourceTenderId,
+                totalUpdated,
+                totalSkipped,
+                status: 'IN_PROGRESS',
+                updatedAt: new Date().toISOString()
+              };
+              saveCheckpoint(lastCheckpointState);
               continue;
             }
 
-            // Click tender title link to open details
+            // Click tender title to open details
             await Promise.all([
-              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
-              tenderLink.click({ timeout: 2000 })
+              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+              tenderLink.click({ timeout: 4000 })
             ]);
+
+            // 3. ENSURE TENDER DETAILS DATA IS FULLY LOADED BEFORE EXTRACTING
+            await page.waitForSelector("table:has-text('Critical Dates')", { state: 'visible', timeout: 25000 }).catch(() => {});
             await page.waitForTimeout(600);
 
             // Scrape detailed metadata
@@ -341,25 +313,28 @@ async function run() {
             // Return to list page
             const backBtn = page.locator("a#DirectLink_11, a.customButton_link:has-text('Back'), a[title='Back'], a:has-text('Back')").last();
             await Promise.all([
-              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
-              backBtn.click({ timeout: 3000 }).catch(() => {})
+              page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
+              backBtn.click({ timeout: 4000 }).catch(() => {})
             ]);
-            await page.waitForTimeout(500);
+
+            // 4. ENSURE THE LIST TABLE HAS FULLY RE-LOADED BEFORE PROCEEDING TO NEXT TENDER
+            await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 25000 }).catch(() => {});
+            await page.waitForTimeout(400);
 
           } catch (itemErr) {
             console.error(`   ⚠️ Error enriching ${summary.sourceTenderId}: ${itemErr.message}`);
 
-            // Resilient recovery: check if we are still on the list page
+            // Recovery: verify we are back on list table
             const onListPage = (await page.locator("table.list_table").count()) > 0;
             if (!onListPage) {
-              console.log(`   🔄 [RECOVERY] Attempting recovery back to list page...`);
+              console.log(`   🔄 [RECOVERY] Lost list page. Recovering back to organisation view...`);
               try {
                 const backBtn = page.locator("a#DirectLink_11, a.customButton_link:has-text('Back'), a:has-text('Back')").last();
                 if (await backBtn.count() > 0) {
                   await backBtn.click({ force: true });
+                  await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 20000 }).catch(() => {});
                   await page.waitForTimeout(1000);
                 } else {
-                  // Fallback: reload the organisation page
                   await page.goto(`${adapter.baseUrl}/nicgep/app?page=FrontEndTendersByOrganisation&service=page`, { waitUntil: 'domcontentloaded' });
                   const reOrgRow = page.locator("table#table tr[id^='informal']").filter({ hasText: org.orgName }).first();
                   await reOrgRow.locator("td:nth-child(3) a").first().click();
@@ -389,7 +364,6 @@ async function run() {
           const links = Array.from(document.querySelectorAll('a'));
           const targetLink = links.find(l => l.textContent.trim() === String(target));
           if (targetLink) { targetLink.click(); return true; }
-          // Try Next button
           const nextBtn = links.find(l => l.textContent.trim() === 'Next >');
           if (nextBtn) { nextBtn.click(); return true; }
           return false;
@@ -397,6 +371,7 @@ async function run() {
 
         if (hasNextPage && totalUpdated < limit) {
           orgPageNum++;
+          await page.waitForSelector("table.list_table tr[id^='informal']", { state: 'visible', timeout: 25000 }).catch(() => {});
           await page.waitForTimeout(1000);
         } else {
           orgHasMore = false;
@@ -419,7 +394,7 @@ async function run() {
     console.log(`🎉 METADATA ENRICHMENT & R2 JSON SYNC COMPLETE`);
     console.log(`======================================================================`);
     console.log(`📊 Total Tenders Enriched & Verified: ${totalUpdated}`);
-    console.log(`⏩ Total Tenders Skipped/Expired:    ${totalSkipped}`);
+    console.log(`⏩ Total Tenders Skipped (Not Found): ${totalSkipped}`);
     console.log(`📦 Cloudflare R2 JSONs Uploaded:     ${totalR2Json}`);
     console.log(`⏱️ Duration:                          ${Math.round((Date.now() - startTime) / 1000)}s`);
     console.log(`======================================================================\n`);
