@@ -241,67 +241,16 @@ async function run() {
       }, async (batch) => {
         for (const tender of batch) {
           try {
-            const normalized = adapter.normalize(tender);
-
-            const existing = await Tender.findOne({
-              sourcePortal: normalized.sourcePortal,
-              sourceTenderId: normalized.sourceTenderId
-            }).lean();
-
-            if (existing) {
-              // Merge nitDocuments without duplicates
-              const existingNit = existing.nitDocuments || [];
-              const newNit = normalized.nitDocuments || [];
-              const mergedNit = [...existingNit];
-              for (const doc of newNit) {
-                if (!mergedNit.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
-                  mergedNit.push(doc);
-                }
-              }
-              normalized.nitDocuments = mergedNit;
-
-              // Merge pdfUrls without duplicates
-              const existingPdfs = existing.pdfUrls || [];
-              const newPdfs = normalized.pdfUrls || [];
-              normalized.pdfUrls = Array.from(new Set([...existingPdfs, ...newPdfs]));
-
-              // Merge workItemDocuments without duplicates
-              const existingWork = existing.workItemDocuments || [];
-              const newWork = normalized.workItemDocuments || [];
-              const mergedWork = [...existingWork];
-              for (const doc of newWork) {
-                if (!mergedWork.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
-                  mergedWork.push(doc);
-                }
-              }
-              normalized.workItemDocuments = mergedWork;
-
-              if (!normalized.boqFileUrl && existing.boqFileUrl) {
-                normalized.boqFileUrl = existing.boqFileUrl;
-              }
-              if (!normalized.boqZipUrl && existing.boqZipUrl) {
-                normalized.boqZipUrl = existing.boqZipUrl;
-                normalized.zipFileName = existing.zipFileName;
-                normalized.zipFileSizeKb = existing.zipFileSizeKb;
-              }
-            }
-
-            await Tender.findOneAndUpdate(
-              { sourcePortal: normalized.sourcePortal, sourceTenderId: normalized.sourceTenderId },
-              { $set: normalized },
-              { upsert: true, returnDocument: 'after' }
-            );
-
             savedCount++;
-            if (normalized.pdfUrls && normalized.pdfUrls.length > 0) pdfCount += normalized.pdfUrls.length;
-            if (normalized.boqZipUrl || normalized.boqFileUrl) boqCount++;
-            if (normalized.pdfFetchStatus === 'PENDING') missingPdfCount++;
+            if (tender.pdfUrls && tender.pdfUrls.length > 0) pdfCount += tender.pdfUrls.length;
+            if (tender.boqZipUrl || tender.boqFileUrl) boqCount++;
+            if (tender.pdfFetchStatus === 'PENDING') missingPdfCount++;
 
-            console.log(`✅ [Saved: ${savedCount} | Skipped: ${skippedCount}] ${normalized.sourceTenderId} (${normalized.departmentCode || 'GEN'})`);
-            console.log(`   📁 Key: ${normalized.r2StorageKey}`);
-            console.log(`   📄 NIT Docs: ${normalized.nitDocuments?.length || 0} | 📦 BOQ ZIP: ${normalized.boqZipUrl ? 'Secured (' + (normalized.zipFileSizeKb || '?') + ' KB)' : 'None'} | 📊 Status: ${normalized.pdfFetchStatus}`);
+            console.log(`✅ [Saved: ${savedCount} | Skipped: ${skippedCount}] ${tender.sourceTenderId} (${tender.departmentCode || 'GEN'})`);
+            console.log(`   📁 Key: ${tender.r2StorageKey}`);
+            console.log(`   📄 NIT Docs: ${tender.nitDocuments?.length || 0} | 📦 BOQ ZIP: ${tender.boqZipUrl ? 'Secured (' + (tender.zipFileSizeKb || '?') + ' KB)' : 'None'} | 📊 Status: ${tender.pdfFetchStatus}`);
           } catch (saveErr) {
-            console.error(`❌ Error saving tender ${tender.sourceTenderId}: ${saveErr.message}`);
+            console.error(`❌ Error logging saved tender ${tender.sourceTenderId}: ${saveErr.message}`);
           }
         }
       });

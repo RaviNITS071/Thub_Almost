@@ -1,9 +1,36 @@
+/**
+ * @file backend/src/services/adapters/JKTenderAdapter.js
+ * @description Primary adapter for fetching ALL active tenders across organisations on JKTenders (jktenders.gov.in).
+ * 
+ * Features:
+ * 1. Organisation-Level Active Tenders Crawl:
+ *    - Ingests active tenders by traversing "Tenders by Organisation" (FrontEndTendersByOrganisation).
+ *    - Supports multi-instance distributed crawling via orgFilter / excludeOrgFilter.
+ *    - Resumes seamlessly from checkpoints (.crawl_checkpoint.json).
+ *    - Detects intermediate multi-item sub-tables ("Tender List : Open Tender") and ingests all work packages.
+ * 2. Complete Metadata & Document Ingestion:
+ *    - Extracts 100% of fields: Basic Details, Payment Instruments, Covers Info, Other Important Documents,
+ *      Work Item Details, Critical Dates in IST, Tender Inviting Authority.
+ *    - Solves download captchas automatically via captchaService (TrueCaptcha / CapSolver / manual fallback).
+ *    - Downloads all NIT PDFs and BOQ ZIP packages.
+ *    - Compresses large PDFs (>5MB) via Ghostscript.
+ *    - Uploads documents and self-describing tender.json to Cloudflare R2 under canonical storage keys:
+ *      tenders/{deptCode}/{tenderId}_{publishedDate}/{fileName}
+ *    - Upserts clean, deduplicated tender records into MongoDB Atlas.
+ *    - Updates PendingDocumentTender for tenders awaiting future document download start dates.
+ * 3. Scope of Use:
+ *    - JKTenderAdapter is used specifically for fetching all active tender data across each organisation.
+ *    - For targeted daily crawls and custom date crawls, use JKTenderDateAdapter.
+ */
+
 import { TenderSourceAdapter } from './TenderSourceAdapter.js';
 import { chromium } from 'playwright';
 import { uploadFileToR2, uploadPdfToR2, uploadJsonToR2, formatTenderStorageKey, extractDeptCode } from '../../utils/r2Storage.js';
 import { parseISTDate, formatStandardTime, extractDateParts } from '../../utils/dateUtils.js';
 import { captchaService } from '../captcha.service.js';
 import SystemLog from '../../models/SystemLog.js';
+import Tender from '../../models/Tender.js';
+import PendingDocumentTender from '../../models/PendingDocumentTender.js';
 import AdmZip from 'adm-zip';
 import fs from 'fs';
 import os from 'os';
@@ -37,6 +64,10 @@ export class JKTenderAdapter extends TenderSourceAdapter {
     this.baseUrl = 'https://jktenders.gov.in';
     this.latestActiveUrl = 'https://jktenders.gov.in/nicgep/app?page=FrontEndLatestActiveTenders&service=page';
     this.departmentRootUrl = 'https://jktenders.gov.in/nicgep/app?page=FrontEndTendersByOrganisation&service=page';
+    this.lastCaptchaTime = null;
+    this.captchaCount = 0;
+    this.captchaAttempts = 0;
+    this.captchaSuccesses = 0;
   }
 
   /**
@@ -191,14 +222,16 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         await this.humanDelay(page, 400, 650);
 
         // Scrape tender details & download documents directly in page
-        const { processedItem, pdfCount } = await this.scrapeTenderDetailAndPdfInPage(page, item, item.organisationChain || 'Latest');
+        const { processedItem, pdfCount, boqCount, hasDocuments, docReason } = await this.scrapeTenderDetailAndPdfInPage(page, item, item.organisationChain || 'Latest');
         if (pdfCount > 0) pdfCountTotal += pdfCount;
         else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
 
+        // Save to MongoDB Atlas and upload tender.json to Cloudflare R2
+        const saved = await this.saveTenderAndUploadR2(processedItem, hasDocuments, docReason);
         currentCount++;
 
         if (onPageScraped) {
-          await onPageScraped([processedItem]);
+          await onPageScraped([saved]);
         }
 
         // Return to Latest Active Tenders list
@@ -224,71 +257,60 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
       if (hasMorePages && currentCount < maxTenders) {
         currentPage++;
-        await page.waitForTimeout(2500);
+        await this.humanDelay(page, 700, 1100);
       } else {
         hasMorePages = false;
       }
     }
 
-    onBatchUpdate(currentCount, pdfCountTotal, missingCountTotal);
+    if (onBatchUpdate) {
+      onBatchUpdate(currentCount, pdfCountTotal, missingCountTotal);
+    }
   }
 
   /**
    * Ensures page returns to the Latest Active Tenders list
    */
   async ensureOnLatestActiveTendersList(page, currentPage = 1) {
-    const isList = await page.locator('table.list_table').isVisible({ timeout: 4000 }).catch(() => false);
-    if (isList) return true;
+    const isTableVisible = await page.locator("table.list_table").isVisible({ timeout: 4000 }).catch(() => false);
+    if (isTableVisible) return true;
 
-    // Check if on captcha page
-    const isCaptcha = await page.locator("img[name='captchaImage'], #captchaImage").isVisible({ timeout: 2000 }).catch(() => false);
-    if (isCaptcha) {
-      const captchaBack = page.locator("a.customButton_link:has-text('Back'), a:has-text('Back'), input[value='Back']").first();
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
-        captchaBack.click({ noWaitAfter: true }).catch(() => {})
-      ]);
-      await this.humanDelay(page, 400, 600);
-    }
-
-    // If on Details page, click Back
-    const backBtn = page.locator("a#DirectLink_11, a.customButton_link:has-text('Back'), a[title='Back'], a:has-text('Back'), input[value='Back']").last();
-    const hasBack = await backBtn.isVisible({ timeout: 2000 }).catch(() => false);
-    if (hasBack) {
+    // Check if on tender details, click Back
+    const backBtn = page.locator("a.customButton_link:has-text('Back'), a[title='Back'], a:has-text('Back'), input[value='Back']").last();
+    if (await backBtn.count() > 0) {
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
         backBtn.click({ noWaitAfter: true }).catch(() => {})
       ]);
       await this.humanDelay(page, 400, 600);
+      const isNowTable = await page.locator("table.list_table").isVisible({ timeout: 4000 }).catch(() => false);
+      if (isNowTable) return true;
     }
 
-    // If still not on list, navigate cleanly to latestActiveUrl
-    const onListNow = await page.locator('table.list_table').isVisible({ timeout: 3000 }).catch(() => false);
-    if (!onListNow) {
-      await page.goto(this.latestActiveUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await this.handleSearchFormCaptcha(page, 'Latest Active Tenders');
-      if (currentPage > 1) {
-        await page.evaluate((targetPg) => {
-          const links = Array.from(document.querySelectorAll('a'));
-          let targetLink = links.find(l => l.textContent.trim() === String(targetPg));
-          if (targetLink) targetLink.click();
-        }, currentPage);
-        await page.waitForTimeout(2000);
-      }
+    // Direct fallback
+    logger.warn('Direct fallback navigation to Latest Active Tenders page...');
+    await page.goto(this.latestActiveUrl, { waitUntil: 'networkidle', timeout: 45000 });
+    await this.handleSearchFormCaptcha(page, 'Latest Active Tenders');
+
+    if (currentPage > 1) {
+      await page.evaluate((targetPg) => {
+        const links = Array.from(document.querySelectorAll('a'));
+        const targetLink = links.find(l => l.textContent.trim() === String(targetPg));
+        if (targetLink) targetLink.click();
+      }, currentPage);
+      await this.humanDelay(page, 800, 1200);
     }
+
     return true;
   }
 
-  /**
-   * Randomized human-like delay to prevent robotic timing signatures
-   */
   async humanDelay(page, minMs = 300, maxMs = 600) {
     const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
     await page.waitForTimeout(delay);
   }
 
   /**
-   * Crawls tenders by Department hierarchy
+   * Crawls tenders by Department hierarchy (All Active Tenders of Each Organisation)
    */
   async crawlByDepartment(page, context, maxTenders, onPageScraped, onBatchUpdate, filters = {}) {
     logger.info(`[Homepage] Navigating to JK Tenders homepage: https://jktenders.gov.in/nicgep/app`);
@@ -364,7 +386,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         }
 
         logger.info(`\n======================================================`);
-        logger.info(`🏛️ [Organisation ${o + 1}/${orgRows.length}] Entering: "${org.orgName}" (${org.count} tenders)`);
+        logger.info(`🏛️ [Organisation ${o + 1}/${orgRows.length}] Entering: "${org.orgName}" (${org.count} active tenders)`);
         logger.info(`======================================================`);
 
         // Click the tender count link for this organisation in table#table tr[id^='informal']
@@ -455,8 +477,12 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
             try {
               // Click tender title link (in td 5) to open Tender Details in the SAME tab
-              let tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: tenderSummary.sourceTenderId }).locator("td:nth-child(5) a, a").first();
-              const exists = await tenderLink.count().catch(() => 0);
+              let tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: `[${tenderSummary.sourceTenderId}]` }).locator("td:nth-child(5) a, a").first();
+              let exists = await tenderLink.count().catch(() => 0);
+              if (exists === 0) {
+                tenderLink = page.locator("table.list_table tr, tr[id^='informal']").filter({ hasText: tenderSummary.sourceTenderId }).locator("td:nth-child(5) a, a").first();
+                exists = await tenderLink.count().catch(() => 0);
+              }
               if (exists === 0) {
                 tenderLink = page.locator("table.list_table tr:has(td:nth-child(5) a)").nth(t).locator("td:nth-child(5) a").first();
               }
@@ -466,32 +492,140 @@ export class JKTenderAdapter extends TenderSourceAdapter {
               ]);
               await this.humanDelay(page, 400, 650);
 
-              // Scrape tender details & download documents directly in page
-              const { processedItem, pdfCount } = await this.scrapeTenderDetailAndPdfInPage(page, tenderSummary, org.orgName);
-              if (pdfCount > 0) pdfCountTotal += pdfCount;
-              else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
+              // Check if loaded page is an intermediate multi-item list ("Tender List : Open Tender")
+              const isMultiTenderList = await page.evaluate(() => {
+                const text = document.body ? document.body.innerText : '';
+                const hasSubTable = !!document.querySelector("table.list_table tr[id^='informal']");
+                const hasBasicDetails = text.includes('Basic Details') || !!document.querySelector("table:has(td:has-text('Basic Details'))");
+                return (text.includes('Tender List : Open Tender') || text.includes('Tender List :')) && hasSubTable && !hasBasicDetails;
+              }).catch(() => false);
 
-              currentCount++;
+              if (isMultiTenderList) {
+                logger.info(`🗂️ [MULTI-TENDER DETECTED] Portal opened multi-work table for NIT: ${tenderSummary.sourceTenderId}`);
 
-              if (onPageScraped) {
-                await onPageScraped([processedItem]);
-              }
-
-              if (filters.onCheckpoint) {
-                await filters.onCheckpoint({
-                  orgIndex: o,
-                  orgName: org.orgName,
-                  orgPageNum,
-                  lastTenderId: tenderSummary.sourceTenderId,
-                  totalProcessed: currentCount,
-                  status: 'IN_PROGRESS'
+                const workRows = await page.evaluate(() => {
+                  const rows = Array.from(document.querySelectorAll("table.list_table tr[id^='informal']"));
+                  return rows.map((r, idx) => {
+                    const tds = r.querySelectorAll('td');
+                    if (tds.length < 5) return null;
+                    const fullText = r.innerText.trim();
+                    const bracketMatches = fullText.match(/\[(.*?)\]/g) || [];
+                    const tenderId = bracketMatches.length >= 1 ? bracketMatches[bracketMatches.length - 1].replace(/[\[\]]/g, '').trim() : '';
+                    const a = tds[4].querySelector('a');
+                    return {
+                      index: idx,
+                      sourceTenderId: tenderId,
+                      title: a ? a.innerText.trim() : tds[4].innerText.trim(),
+                      publishedDate: tds[1] ? tds[1].innerText.trim() : '',
+                      publishedDateStr: tds[1] ? tds[1].innerText.trim() : '',
+                      closingDate: tds[2] ? tds[2].innerText.trim() : '',
+                      closingDateStr: tds[2] ? tds[2].innerText.trim() : '',
+                      openingDate: tds[3] ? tds[3].innerText.trim() : '',
+                      openingDateStr: tds[3] ? tds[3].innerText.trim() : '',
+                      hasLink: !!a
+                    };
+                  }).filter(w => w && w.hasLink && w.sourceTenderId);
                 });
+
+                logger.info(`   📋 Found ${workRows.length} work items in multi-tender table.`);
+                const allWorkIds = workRows.map(w => w.sourceTenderId);
+                const baseId = tenderSummary.sourceTenderId.replace(/_\d+$/, '') || tenderSummary.sourceTenderId;
+
+                for (let w = 0; w < workRows.length && currentCount < maxTenders; w++) {
+                  const workSummary = workRows[w];
+                  logger.info(`   🔨 [Multi-Work Item ${w + 1}/${workRows.length}] Opening: ${workSummary.sourceTenderId}`);
+
+                  if (filters.shouldSkipTender && workSummary.sourceTenderId) {
+                    const shouldSkip = await filters.shouldSkipTender(workSummary.sourceTenderId, workSummary.publishedDate);
+                    if (shouldSkip) {
+                      logger.info(`⏩ [Skip Already Ingested] Multi-work tender ${workSummary.sourceTenderId} is already in DB.`);
+                      if (filters.countSkippedTowardsLimit !== false) currentCount++;
+                      continue;
+                    }
+                  }
+
+                  let workRow = page.locator("table.list_table tr[id^='informal']").filter({ hasText: `[${workSummary.sourceTenderId}]` }).first();
+                  let hasExactWork = (await workRow.count().catch(() => 0)) > 0;
+                  let workLink;
+                  if (hasExactWork) {
+                    workLink = workRow.locator("td:nth-child(5) a, a").first();
+                  } else {
+                    workLink = page.locator("table.list_table tr[id^='informal']").nth(workSummary.index).locator("td:nth-child(5) a, a").first();
+                  }
+
+                  await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 35000 }).catch(() => {}),
+                    workLink.click({ noWaitAfter: true, timeout: 15000 }).catch(() => workLink.click({ force: true, noWaitAfter: true }))
+                  ]);
+                  await page.waitForSelector("table:has-text('Basic Details'), table:has-text('Critical Dates')", { timeout: 30000 }).catch(() => {});
+                  await this.humanDelay(page, 400, 650);
+
+                  const { processedItem, pdfCount, boqCount, hasDocuments, docReason } = await this.scrapeTenderDetailAndPdfInPage(page, workSummary, org.orgName);
+                  if (pdfCount > 0) pdfCountTotal += pdfCount;
+                  else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
+
+                  const isActuallyMulti = workRows.length > 1;
+                  processedItem.isMultiTender = isActuallyMulti;
+                  processedItem.baseTenderId = isActuallyMulti ? baseId : null;
+                  processedItem.relatedTenderIds = isActuallyMulti ? allWorkIds.filter(id => id !== workSummary.sourceTenderId) : [];
+
+                  const saved = await this.saveTenderAndUploadR2(processedItem, hasDocuments, docReason);
+                  currentCount++;
+
+                  if (onPageScraped) {
+                    await onPageScraped([saved]);
+                  }
+
+                  if (filters.onCheckpoint) {
+                    await filters.onCheckpoint({
+                      orgIndex: o,
+                      orgName: org.orgName,
+                      orgPageNum,
+                      lastTenderId: workSummary.sourceTenderId,
+                      totalProcessed: currentCount,
+                      status: 'IN_PROGRESS'
+                    });
+                  }
+
+                  // Return from work details to intermediate "Tender List : Open Tender"
+                  await this.navigateBackFromTenderDetails(page);
+                  await this.humanDelay(page, 300, 500);
+                }
+
+                // After all works finished, return to organisation's main tender list
+                await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
+                await this.humanDelay(page, 300, 500);
+
+              } else {
+                // Standard single tender
+                const { processedItem, pdfCount, boqCount, hasDocuments, docReason } = await this.scrapeTenderDetailAndPdfInPage(page, tenderSummary, org.orgName);
+                if (pdfCount > 0) pdfCountTotal += pdfCount;
+                else if (processedItem.pdfFetchStatus === 'PENDING') missingCountTotal++;
+
+                const saved = await this.saveTenderAndUploadR2(processedItem, hasDocuments, docReason);
+                currentCount++;
+
+                if (onPageScraped) {
+                  await onPageScraped([saved]);
+                }
+
+                if (filters.onCheckpoint) {
+                  await filters.onCheckpoint({
+                    orgIndex: o,
+                    orgName: org.orgName,
+                    orgPageNum,
+                    lastTenderId: tenderSummary.sourceTenderId,
+                    totalProcessed: currentCount,
+                    status: 'IN_PROGRESS'
+                  });
+                }
+
+                // Safely return to the Organisation's Tender List
+                logger.info(`🔙 Returning from Tender Details to Tender List...`);
+                await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
+                await this.humanDelay(page, 400, 650);
               }
 
-              // Safely return to the Organisation's Tender List
-              logger.info(`🔙 Returning from Tender Details to Tender List...`);
-              await this.ensureOnOrganisationTenderList(page, org.orgName, orgPageNum);
-              await this.humanDelay(page, 400, 650);
             } catch (tenderErr) {
               logger.error(`⚠️ Transient error on tender ${tenderSummary.sourceTenderId || 'unknown'}: ${tenderErr.message}`);
               // Recover page back to Organisation's Tender List so next tender can continue
@@ -561,7 +695,9 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       break; // Crawl cycle finished
     }
 
-    onBatchUpdate(currentCount, pdfCountTotal, missingCountTotal);
+    if (onBatchUpdate) {
+      onBatchUpdate(currentCount, pdfCountTotal, missingCountTotal);
+    }
   }
 
   /**
@@ -570,10 +706,11 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   async scrapeTenderDetailAndPdfInPage(page, summary, orgName) {
     const item = { ...summary };
     let pdfCountSecured = 0;
+    let boqCountSecured = 0;
 
     try {
       const detailedData = await page.evaluate((summaryData) => {
-        const pageText = document.body.innerText;
+        const pageText = document.body ? document.body.innerText : '';
         const isDocumentAvailable = !pageText.includes('Document download date is not begun yet');
 
         const getTableVal = (labelText) => {
@@ -600,215 +737,20 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           return isNaN(val) ? 0 : val;
         };
 
-        // Extract Payment Instruments (Offline Instruments table)
-        const offlineInstruments = [];
         const allTables = Array.from(document.querySelectorAll('table'));
-        for (const tbl of allTables) {
-          // Strictly skip outer container/wrapper tables
-          if (tbl.querySelectorAll('table').length > 0) continue;
 
-          const trs = Array.from(tbl.querySelectorAll('tr'));
-          const hasHeader = trs.some(tr => {
-            const txt = tr.textContent;
-            return txt.includes('Instrument Type') && (txt.includes('S.No') || txt.includes('S.No.'));
-          });
-
-          if (hasHeader) {
-            for (const tr of trs) {
-              // Skip header rows or navigation bars
-              if (tr.querySelector('th') || tr.textContent.includes('Instrument Type') || tr.textContent.includes('Active Tenders')) continue;
-              const tds = Array.from(tr.querySelectorAll('td'));
-              if (tds.length >= 2) {
-                let sNo = null;
-                let instType = '';
-
-                if (tds.length === 2) {
-                  sNo = parseInt(tds[0].textContent.trim(), 10);
-                  instType = tds[1].textContent.trim().replace(/\s+/g, ' ');
-                } else if (tds.length >= 3) {
-                  const p0 = parseInt(tds[0].textContent.trim(), 10);
-                  const p1 = parseInt(tds[1].textContent.trim(), 10);
-                  if (!isNaN(p0)) {
-                    sNo = p0;
-                    instType = tds[1].textContent.trim().replace(/\s+/g, ' ');
-                  } else if (!isNaN(p1)) {
-                    sNo = p1;
-                    instType = tds[2].textContent.trim().replace(/\s+/g, ' ');
-                  }
-                }
-
-                if (sNo !== null && !isNaN(sNo) && instType && instType.length >= 3) {
-                  // Guard against any leaked navbar or date strings
-                  if (!/\d{1,2}-[a-z]{3}-\d{4}/i.test(instType) && !instType.includes('Search') && !instType.includes('Results') && !instType.toLowerCase().includes('other document')) {
-                    offlineInstruments.push({ sNo, instrumentType: instType });
-                  }
-                }
-              }
-            }
-            if (offlineInstruments.length > 0) break;
-          }
-        }
-
-        // Extract Covers Information table (with full Description, Document Type, and rowspan support)
-        const coversInfo = [];
-        for (const tbl of allTables) {
-          if (tbl.querySelectorAll('table').length > 0) continue;
-
-          const trs = Array.from(tbl.querySelectorAll('tr'));
-          const hasCoverHeader = trs.some(tr => {
-            const txt = tr.textContent;
-            return txt.includes('Cover No') && txt.includes('Document Type');
-          });
-
-          if (hasCoverHeader) {
-            let currentCoverNo = 1;
-            let currentCoverType = 'Fee/PreQual/Technical';
-
-            for (const tr of trs) {
-              if (tr.querySelector('th') || tr.textContent.includes('Cover No') || tr.textContent.includes('Document Type') || tr.textContent.includes('Active Tenders')) continue;
-              const tds = Array.from(tr.querySelectorAll('td'));
-              if (tds.length === 0) continue;
-
-              if (tds.length >= 4) {
-                const parsedNo = parseInt(tds[0].textContent.trim(), 10);
-                if (!isNaN(parsedNo)) currentCoverNo = parsedNo;
-                const parsedType = tds[1].textContent.trim().replace(/\s+/g, ' ');
-                if (parsedType) currentCoverType = parsedType;
-                const desc = tds[2].textContent.trim().replace(/\s+/g, ' ');
-                const docType = tds[3].textContent.trim().replace(/\s+/g, ' ');
-
-                if (desc || docType) {
-                  coversInfo.push({
-                    coverNo: currentCoverNo,
-                    coverType: currentCoverType,
-                    description: desc,
-                    documentType: docType
-                  });
-                }
-              } else if (tds.length === 2) {
-                // Continuation row under same cover due to rowspan (Description, Document Type)
-                const desc = tds[0].textContent.trim().replace(/\s+/g, ' ');
-                const docType = tds[1].textContent.trim().replace(/\s+/g, ' ');
-
-                if (desc || docType) {
-                  coversInfo.push({
-                    coverNo: currentCoverNo,
-                    coverType: currentCoverType,
-                    description: desc,
-                    documentType: docType
-                  });
-                }
-              } else if (tds.length === 3) {
-                const parsedNo = parseInt(tds[0].textContent.trim(), 10);
-                let desc = '';
-                let docType = '';
-                if (!isNaN(parsedNo)) {
-                  currentCoverNo = parsedNo;
-                  desc = tds[1].textContent.trim().replace(/\s+/g, ' ');
-                  docType = tds[2].textContent.trim().replace(/\s+/g, ' ');
-                } else {
-                  const parsedType = tds[0].textContent.trim().replace(/\s+/g, ' ');
-                  if (parsedType) currentCoverType = parsedType;
-                  desc = tds[1].textContent.trim().replace(/\s+/g, ' ');
-                  docType = tds[2].textContent.trim().replace(/\s+/g, ' ');
-                }
-
-                if (desc || docType) {
-                  coversInfo.push({
-                    coverNo: currentCoverNo,
-                    coverType: currentCoverType,
-                    description: desc,
-                    documentType: docType
-                  });
-                }
-              }
-            }
-            if (coversInfo.length > 0) break;
-          }
-        }
-
-        // Extract Tender Inviting Authority (specifically from authority table if present)
-        let invitingAuthorityName = "";
-        let invitingAuthorityAddress = "";
-        for (const tbl of allTables) {
-          if (tbl.querySelectorAll('table').length > 0) continue;
-          if (tbl.textContent.includes('Tender Inviting Authority')) {
-            const tds = Array.from(tbl.querySelectorAll('td'));
-            for (const td of tds) {
-              const txt = td.textContent.trim().replace(/\s+/g, ' ').replace(/:$/, '').trim();
-              if (txt === 'Name') {
-                const next = td.nextElementSibling;
-                if (next && next.tagName === 'TD') invitingAuthorityName = next.textContent.trim().replace(/\s+/g, ' ');
-              } else if (txt === 'Address') {
-                const next = td.nextElementSibling;
-                if (next && next.tagName === 'TD') invitingAuthorityAddress = next.textContent.trim().replace(/\s+/g, ' ');
-              }
-            }
-            if (invitingAuthorityName || invitingAuthorityAddress) break;
-          }
-        }
-        if (!invitingAuthorityName) invitingAuthorityName = getTableVal('Name');
-        if (!invitingAuthorityAddress) invitingAuthorityAddress = getTableVal('Address');
-
-        // Extract NIT Document table metadata (innermost table with Document Name & Document Size)
-        const rawNitDocs = [];
-        const nitTable = Array.from(document.querySelectorAll('table')).find(tbl => {
-          if (tbl.querySelectorAll('table').length > 0) return false;
-          const text = tbl.innerText || '';
-          return text.includes('Document Name') && text.includes('Document Size');
-        });
-        if (nitTable) {
-          const rows = Array.from(nitTable.querySelectorAll('tr'));
-          rows.forEach(tr => {
-            const tds = Array.from(tr.querySelectorAll('td'));
-            if (tds.length >= 4) {
-              const sNo = parseInt(tds[0].innerText.trim(), 10);
-              const docName = tds[1].innerText.trim();
-              const desc = tds[2].innerText.trim();
-              const sizeKb = parseFloat(tds[3].innerText.trim().replace(/,/g, '')) || 0;
-              const isDoc = /\.(pdf|doc|docx)$/i.test(docName) || docName.toLowerCase().includes('tendernotice');
-              if (!isNaN(sNo) && docName && isDoc && !docName.includes('Search') && !docName.includes('Result')) {
-                rawNitDocs.push({ sNo, documentName: docName, description: desc, documentSizeKb: sizeKb });
-              }
-            }
-          });
-        }
-
-        // Extract Work Item Documents table metadata
-        const workItemDocuments = [];
-        const workTable = document.querySelector('table#workItemDocumenttable') || Array.from(document.querySelectorAll('table')).find(tbl => {
-          const text = tbl.innerText || '';
-          return text.includes('Work Item Documents') && text.includes('Document Type') && text.includes('Document Name');
-        });
-        if (workTable) {
-          const rows = Array.from(workTable.querySelectorAll('tr'));
-          rows.forEach(tr => {
-            const tds = Array.from(tr.querySelectorAll('td'));
-            if (tds.length >= 5) {
-              const sNo = parseInt(tds[0].innerText.trim(), 10);
-              const docType = tds[1].innerText.trim();
-              const docName = tds[2].innerText.trim();
-              const desc = tds[3].innerText.trim();
-              const sizeKb = parseFloat(tds[4].innerText.trim().replace(/,/g, '')) || 0;
-              if (!isNaN(sNo) && docName) {
-                workItemDocuments.push({ sNo, documentType: docType, documentName: docName, description: desc, documentSizeKb: sizeKb });
-              }
-            }
-          });
-        }
-
-        // Extract Critical Dates specifically using exact label lookup across non-container table cells
+        // 1. Critical Dates with robust text matching and regex
         const getDateByLabel = (labels) => {
-          const normalizedLabels = (Array.isArray(labels) ? labels : [labels]).map(l => l.toLowerCase().replace(/[:₹\s]/g, ''));
-          const tds = Array.from(document.querySelectorAll('td'));
-          for (const td of tds) {
-            if (td.querySelector('table')) continue;
-            const text = td.innerText.trim().toLowerCase().replace(/[:₹\s]/g, '');
-            if (normalizedLabels.includes(text)) {
-              let next = td.nextElementSibling;
-              if (next && next.tagName === 'TD') {
-                const val = next.innerText.trim().replace(/\s+/g, ' ');
-                if (val && val !== 'NA' && val !== 'N/A') return val;
+          const textNodes = Array.from(document.querySelectorAll('td, th, div, span'));
+          for (const node of textNodes) {
+            if (node.querySelector('table')) continue;
+            const tableText = node.innerText || node.textContent || '';
+            for (const label of (Array.isArray(labels) ? labels : [labels])) {
+              const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              const reg = new RegExp(escaped + '[\\s\\t:]*([0-9]{1,2}[-/][a-zA-Z0-9]{3}[-/][0-9]{4}(?:\\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\\s*(?:AM|PM)?)?)', 'i');
+              const match = tableText.match(reg);
+              if (match && match[1] && match[1] !== 'NA' && match[1] !== 'N/A') {
+                return match[1].trim().replace(/\s+/g, ' ');
               }
             }
           }
@@ -823,6 +765,176 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         const critClarificationEndDate = getDateByLabel(['Clarification End Date']);
         const critBidSubmissionStartDate = getDateByLabel(['Bid Submission Start Date']);
         const critBidSubmissionEndDate = getDateByLabel(['Bid Submission End Date']);
+
+        // Date Guard: Use detail page official critical date, or listing table date
+        let finalPublishedDateStr = critPublishedDate || summaryData?.publishedDateStr || summaryData?.publishedDate || critDocDownloadStartDate || critBidSubmissionStartDate || null;
+        const refStartDate = critDocDownloadStartDate || critBidSubmissionStartDate;
+        if (finalPublishedDateStr && refStartDate) {
+          const parseFullIST = (s) => {
+            if (!s) return null;
+            const m = s.match(/(\d{1,2})[-/]([a-zA-Z]{3}|\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+            if (!m) return null;
+            const months = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+            const mo = months[m[2].toLowerCase()] ?? (parseInt(m[2], 10) - 1);
+            let h = m[4] ? parseInt(m[4], 10) : 0;
+            const min = m[5] ? parseInt(m[5], 10) : 0;
+            const ampm = m[7] ? m[7].toUpperCase() : null;
+            if (ampm === 'PM' && h < 12) h += 12;
+            if (ampm === 'AM' && h === 12) h = 0;
+            return new Date(Date.UTC(parseInt(m[3], 10), mo, parseInt(m[1], 10), h, min));
+          };
+          const pubD = parseFullIST(finalPublishedDateStr);
+          const refD = parseFullIST(refStartDate);
+          // If published date exceeds doc download or bid submission even by 1 minute, clamp to refStartDate
+          if (pubD && refD && pubD.getTime() > refD.getTime() && refD.getUTCFullYear() >= 2026) {
+            finalPublishedDateStr = refStartDate;
+          }
+        }
+
+        // 2. Extract Payment Instruments (Offline Instruments table)
+        const offlineInstruments = [];
+        for (const tbl of allTables) {
+          if (tbl.querySelectorAll('table').length > 0) continue;
+          const trs = Array.from(tbl.querySelectorAll('tr'));
+          const hasHeader = trs.some(tr => tr.textContent.includes('Instrument Type'));
+          if (hasHeader) {
+            for (const tr of trs) {
+              if (tr.querySelector('th') || tr.textContent.includes('Instrument Type')) continue;
+              const tds = Array.from(tr.querySelectorAll('td'));
+              if (tds.length >= 2) {
+                let sNo = parseInt(tds[0].textContent.trim(), 10);
+                let instType = tds[1].textContent.trim().replace(/\s+/g, ' ');
+                if (tds.length >= 3 && isNaN(sNo)) {
+                  sNo = parseInt(tds[1].textContent.trim(), 10);
+                  instType = tds[2].textContent.trim().replace(/\s+/g, ' ');
+                }
+                if (!isNaN(sNo) && instType && !instType.includes('Search') && !/\d{1,2}-[a-z]{3}-\d{4}/i.test(instType)) {
+                  offlineInstruments.push({ sNo, instrumentType: instType });
+                }
+              }
+            }
+            if (offlineInstruments.length > 0) break;
+          }
+        }
+
+        // 3. Extract Covers Information table
+        const coversInfo = [];
+        for (const tbl of allTables) {
+          if (tbl.querySelectorAll('table').length > 0) continue;
+          const trs = Array.from(tbl.querySelectorAll('tr'));
+          const hasCoverHeader = trs.some(tr => tr.textContent.includes('Cover No') && tr.textContent.includes('Document Type'));
+          if (hasCoverHeader) {
+            let currentCoverNo = 1;
+            let currentCoverType = 'Fee/PreQual/Technical';
+            for (const tr of trs) {
+              if (tr.querySelector('th') || tr.textContent.includes('Cover No')) continue;
+              const tds = Array.from(tr.querySelectorAll('td'));
+              if (tds.length >= 4) {
+                const pNo = parseInt(tds[0].textContent.trim(), 10);
+                if (!isNaN(pNo)) currentCoverNo = pNo;
+                const pType = tds[1].textContent.trim().replace(/\s+/g, ' ');
+                if (pType) currentCoverType = pType;
+                const desc = tds[2].textContent.trim().replace(/\s+/g, ' ');
+                const docType = tds[3].textContent.trim().replace(/\s+/g, ' ');
+                if (desc || docType) coversInfo.push({ coverNo: currentCoverNo, coverType: currentCoverType, description: desc, documentType: docType });
+              } else if (tds.length === 2) {
+                const desc = tds[0].textContent.trim().replace(/\s+/g, ' ');
+                const docType = tds[1].textContent.trim().replace(/\s+/g, ' ');
+                if (desc || docType) coversInfo.push({ coverNo: currentCoverNo, coverType: currentCoverType, description: desc, documentType: docType });
+              }
+            }
+            if (coversInfo.length > 0) break;
+          }
+        }
+
+        // 3b. Other Important Documents List (Mandatory Bidder Checklist)
+        const otherImportantDocuments = [];
+        const oidTable = allTables.find(t => 
+          t.innerText && 
+          (t.innerText.includes('Other Important Documents') || t.innerText.includes('Other Important Documents List')) &&
+          t.innerText.includes('Sub Category')
+        );
+        if (oidTable) {
+          const rows = Array.from(oidTable.querySelectorAll('tr'));
+          for (const tr of rows) {
+            if (tr.querySelector('th') || (tr.textContent.includes('Sub Category') && tr.textContent.includes('Category'))) {
+              continue;
+            }
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (tds.length >= 4) {
+              const sNo = parseInt(tds[0].innerText.trim(), 10);
+              const category = tds[1].innerText.trim().replace(/\s+/g, ' ');
+              const subCategory = tds[2].innerText.trim().replace(/\s+/g, ' ');
+              const description = tds[3].innerText.trim().replace(/\s+/g, ' ');
+              const format = tds[4] ? tds[4].innerText.trim().replace(/\s+/g, ' ') : '';
+              if (!isNaN(sNo) && (category || subCategory)) {
+                otherImportantDocuments.push({
+                  sNo,
+                  category,
+                  subCategory,
+                  description,
+                  format
+                });
+              }
+            }
+          }
+        }
+
+        // 4. Extract NIT Document table metadata
+        const rawNitDocs = [];
+        const nitTable = allTables.find(tbl => tbl.querySelectorAll('table').length === 0 && tbl.innerText.includes('Document Name') && tbl.innerText.includes('Document Size'));
+        if (nitTable) {
+          Array.from(nitTable.querySelectorAll('tr')).forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (tds.length >= 4) {
+              const sNo = parseInt(tds[0].innerText.trim(), 10);
+              const docName = tds[1].innerText.trim();
+              const desc = tds[2].innerText.trim();
+              const sizeKb = parseFloat(tds[3].innerText.trim().replace(/,/g, '')) || 0;
+              const isDoc = /\.(pdf|doc|docx)$/i.test(docName) || docName.toLowerCase().includes('tendernotice');
+              if (!isNaN(sNo) && docName && isDoc && !docName.includes('Search')) {
+                rawNitDocs.push({ sNo, documentName: docName, description: desc, documentSizeKb: sizeKb });
+              }
+            }
+          });
+        }
+
+        // 5. Extract Work Item Documents table metadata
+        const workItemDocuments = [];
+        const workTable = document.querySelector('table#workItemDocumenttable') || allTables.find(t => t.innerText.includes('Work Item Documents') && t.innerText.includes('Document Name'));
+        if (workTable) {
+          Array.from(workTable.querySelectorAll('tr')).forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (tds.length >= 5) {
+              const sNo = parseInt(tds[0].innerText.trim(), 10);
+              const docType = tds[1].innerText.trim();
+              const docName = tds[2].innerText.trim();
+              const desc = tds[3].innerText.trim();
+              const sizeKb = parseFloat(tds[4].innerText.trim().replace(/,/g, '')) || 0;
+              if (!isNaN(sNo) && docName) {
+                workItemDocuments.push({ sNo, documentType: docType, documentName: docName, description: desc, documentSizeKb: sizeKb });
+              }
+            }
+          });
+        }
+
+        // 6. Extract Tender Inviting Authority
+        let invitingAuthorityName = "";
+        let invitingAuthorityAddress = "";
+        for (const tbl of allTables) {
+          if (tbl.querySelectorAll('table').length > 0) continue;
+          if (tbl.textContent.includes('Tender Inviting Authority')) {
+            const tds = Array.from(tbl.querySelectorAll('td'));
+            for (const td of tds) {
+              const txt = td.textContent.trim().replace(/\s+/g, ' ').replace(/:$/, '').trim();
+              if (txt === 'Name') invitingAuthorityName = td.nextElementSibling?.textContent.trim().replace(/\s+/g, ' ') || '';
+              else if (txt === 'Address') invitingAuthorityAddress = td.nextElementSibling?.textContent.trim().replace(/\s+/g, ' ') || '';
+            }
+            if (invitingAuthorityName || invitingAuthorityAddress) break;
+          }
+        }
+        if (!invitingAuthorityName) invitingAuthorityName = getTableVal('Name');
+        if (!invitingAuthorityAddress) invitingAuthorityAddress = getTableVal('Address');
 
         return {
           isDocumentAvailable,
@@ -871,8 +983,8 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           allowPreferentialBidder: getTableVal('Allow Preferential Bidder'),
           tendererClass: getTableVal('Tenderer Class'),
 
-          publishedDate: critPublishedDate || summaryData?.publishedDate || null,
-          publishedDateStr: critPublishedDate || summaryData?.publishedDate || null,
+          publishedDate: finalPublishedDateStr,
+          publishedDateStr: finalPublishedDateStr,
           bidOpeningDate: critBidOpeningDate || summaryData?.openingDate || null,
           bidOpeningDateStr: critBidOpeningDate || summaryData?.openingDate || null,
           documentDownloadStartDate: critDocDownloadStartDate || null,
@@ -894,18 +1006,34 @@ export class JKTenderAdapter extends TenderSourceAdapter {
           invitingAuthorityAddress,
           offlineInstruments,
           coversInfo,
+          otherImportantDocuments,
           rawNitDocs,
           workItemDocuments
         };
-      }, item);
+      }, summary);
 
       Object.assign(item, detailedData);
+      const deptCode = extractDeptCode(item.sourceTenderId, item.organisationChain || orgName);
+      item.departmentCode = deptCode;
+      item.departmentName = item.organisationChain ? item.organisationChain.split('||')[0].trim() : (orgName || 'General');
+      item.publishedDate = parseISTDate(item.publishedDateStr);
+      item.documentDownloadStartDate = parseISTDate(item.documentDownloadStartDateStr);
+      item.documentDownloadEndDate = parseISTDate(item.documentDownloadEndDateStr);
+      item.bidSubmissionStartDate = parseISTDate(item.bidSubmissionStartDateStr);
+      item.bidSubmissionEndDate = parseISTDate(item.bidSubmissionEndDateStr);
+      item.bidOpeningDate = parseISTDate(item.bidOpeningDateStr);
+      item.r2StorageKey = formatTenderStorageKey(item.sourceTenderId, item.publishedDate, deptCode);
       item.pdfUrls = [];
       item.nitDocuments = [];
-      item.workItemDocuments = detailedData.workItemDocuments || [];
+      item.otherImportantDocuments = detailedData.otherImportantDocuments || [];
+
+      const now = new Date();
+      const isFutureDownload = item.documentDownloadStartDate && item.documentDownloadStartDate > now;
+      if (isFutureDownload) {
+        item.isDocumentAvailable = false;
+      }
 
       // 1. Scroll down to "Tenders Documents" section
-      logger.info(`📜 Scrolling down to "Tenders Documents" for: ${item.sourceTenderId}`);
       await page.evaluate(() => {
         const docHeader = Array.from(document.querySelectorAll('td, th, span, div, b')).find(el => el.textContent.trim().includes('Tenders Documents'));
         if (docHeader) {
@@ -925,14 +1053,13 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       const hasZip = await zipLocator.count().catch(() => 0);
 
       const processedFileNames = new Set();
-      let pdfCountSecured = 0;
 
       // If no documents are published yet (common in newly published tenders)
       if (pdfCount === 0 && hasZip === 0) {
         logger.info(`ℹ️ [No Documents Yet] Tender ${item.sourceTenderId} has no downloadable documents yet (marked as PENDING for future sync).`);
         item.isDocumentAvailable = false;
-        item.pdfFetchStatus = 'PENDING';
-        item.boqFetchStatus = 'PENDING';
+        item.pdfFetchStatus = 'NOT_AVAILABLE';
+        item.boqFetchStatus = 'NOT_AVAILABLE';
       } else {
         // 2. Download NIT Documents (.pdf)
         logger.info(`📄 Found ${pdfCount} NIT document link(s) for tender: ${item.sourceTenderId}`);
@@ -1035,7 +1162,8 @@ export class JKTenderAdapter extends TenderSourceAdapter {
             }
 
             if (zipDownload) {
-              await this.processDownloadedZip(zipDownload, item);
+              const zipUploaded = await this.processDownloadedZip(zipDownload, item);
+              if (zipUploaded) boqCountSecured++;
             }
           }
         } catch (boqErr) {
@@ -1051,19 +1179,38 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         }
       }
 
-      // Metadata keys
-      const deptCode = extractDeptCode(item.sourceTenderId, item.organisationChain || orgName);
-      item.departmentCode = deptCode;
-      item.departmentName = item.organisationChain ? item.organisationChain.split('||')[0].trim() : (orgName || 'General');
-      item.r2StorageKey = formatTenderStorageKey(item.sourceTenderId, item.publishedDate, deptCode);
+      let docReason = '';
+      const hasAnyDocsSecured = (pdfCountSecured > 0 || boqCountSecured > 0);
+      if (!hasAnyDocsSecured) {
+        if (isFutureDownload) {
+          docReason = `Document download start date in future: ${item.documentDownloadStartDateStr}`;
+        } else if (pdfCount === 0 && hasZip === 0) {
+          docReason = 'No document download links published on portal yet';
+        } else {
+          docReason = 'Portal documents not yet available for download';
+        }
+      }
 
-      return { processedItem: item, pdfCount: pdfCountSecured };
+      return {
+        processedItem: item,
+        pdfCount: pdfCountSecured,
+        boqCount: boqCountSecured,
+        hasDocuments: hasAnyDocsSecured,
+        docReason
+      };
 
     } catch (err) {
       logger.error(`Error scraping tender ${item.sourceTenderId}: ${err.message}`);
       item.pdfFetchStatus = 'PENDING';
-      return { processedItem: item, pdfCount: 0 };
+      return { processedItem: item, pdfCount: 0, boqCount: 0, hasDocuments: false, docReason: err.message };
     }
+  }
+
+  /**
+   * Alias for backward compatibility and uniform API across adapters
+   */
+  async scrapeDetailAndDocuments(page, summary, orgName) {
+    return this.scrapeTenderDetailAndPdfInPage(page, summary, orgName);
   }
 
   /**
@@ -1091,10 +1238,8 @@ export class JKTenderAdapter extends TenderSourceAdapter {
     if (captchaService.isAutoSolveEnabled()) {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const captchaImg = page.locator("img[name='captchaImage'], #captchaImage, img[src*='captcha']").first();
           const isImgVisible = await captchaImg.isVisible({ timeout: 3000 }).catch(() => false);
           
-          // If captcha image is no longer visible, we may have already navigated back!
           if (!isImgVisible) {
             const hasTenderDetails = await page.locator("a[href*='download'], a.customButton_link, table.list_table").isVisible({ timeout: 2000 }).catch(() => false);
             if (hasTenderDetails) {
@@ -1105,7 +1250,6 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
           logger.info(`🔄 [Auto-Captcha] Attempt ${attempt}/${maxAttempts} for tender: ${tenderId}...`);
           
-          // Allow full render time to capture high-clarity captcha image
           await page.waitForTimeout(1800);
           const imgBuffer = await captchaImg.screenshot().catch(() => null);
           if (!imgBuffer) {
@@ -1121,30 +1265,25 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
           logger.info(`[Auto-Captcha] Attempt ${attempt}: Solved via ${provider} as "${solvedText}". Entering and waiting 2s before submit...`);
 
-          const inputLocator = page.locator("input[name='captchaText'], #captchaText, input[name*='captcha']").first();
           await inputLocator.click().catch(() => {});
           await inputLocator.fill('');
           await inputLocator.fill(solvedText);
           await inputLocator.dispatchEvent('input').catch(() => {});
           await inputLocator.dispatchEvent('change').catch(() => {});
           
-          // Wait 2 full seconds after entering before submitting
           await page.waitForTimeout(2000);
 
-          // Click submit button firmly
-          const submitBtn = page.locator("#Submit, input[type='submit'][value*='Submit'], input[name='Submit'], button[type='submit']").first();
+          const submitBtnLocator = page.locator("#Submit, input[type='submit'][value*='Submit'], input[name='Submit'], button[type='submit']").first();
           
           await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
-            submitBtn.click({ force: true, timeout: 5000 }).catch(async () => {
-              // Fallback: press Enter on the input
+            submitBtnLocator.click({ force: true, timeout: 5000 }).catch(async () => {
               await inputLocator.press('Enter').catch(() => {});
             })
           ]);
 
           await page.waitForTimeout(1500);
 
-          // Check if captcha was accepted
           const stillCaptcha = await page.locator("img[name='captchaImage'], #captchaImage").isVisible({ timeout: 3000 }).catch(() => false);
           const hasTenderDetails = await page.locator("a[href*='download'], a.customButton_link, table.list_table").isVisible({ timeout: 2000 }).catch(() => false);
 
@@ -1153,12 +1292,10 @@ export class JKTenderAdapter extends TenderSourceAdapter {
             return true;
           }
 
-          // Check for error text on page
           const errorMsg = await page.locator('.error, .errorMessage, font[color="red"]').allInnerTexts().catch(() => []);
           const errorStr = errorMsg.filter(Boolean).join('; ');
           logger.warn(`⚠️ [Auto-Captcha] Attempt ${attempt}/${maxAttempts} rejected by portal${errorStr ? ': ' + errorStr : ''}. Retrying...`);
 
-          // If there is a refresh button, refresh the captcha image for next attempt
           const refreshBtn = page.locator("#captcha, button:has-text('Refresh'), a:has-text('Refresh')").first();
           if (await refreshBtn.isVisible().catch(() => false)) {
             await refreshBtn.click().catch(() => {});
@@ -1187,7 +1324,6 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
     await inputLocator.focus().catch(() => {});
 
-    // Wait until the page leaves the Document Download / Captcha view (returns to Tender Details)
     try {
       await page.waitForFunction(() => {
         const hasTenderDetails = document.querySelector("a[href*='download'], a.customButton_link, table.list_table");
@@ -1214,8 +1350,25 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   }
 
   /**
+   * Navigates back one level from Tender Details to the intermediate multi-item sub-table.
+   */
+  async navigateBackFromTenderDetails(page) {
+    try {
+      const backBtn = page.locator("a.customButton_link:has-text('Back'), a[title='Back'], a:has-text('Back'), input[value='Back']").last();
+      if (await backBtn.count() > 0) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {}),
+          backBtn.click({ noWaitAfter: true }).catch(() => backBtn.click({ force: true, noWaitAfter: true }))
+        ]);
+        await this.humanDelay(page, 400, 700);
+      }
+    } catch (err) {
+      logger.warn(`Could not click Back on Tender Details: ${err.message}`);
+    }
+  }
+
+  /**
    * Ensures the page is currently on the Organisation's Tender List table.
-   * If on a Captcha page, Tender Details page, or Organisation List page, navigates appropriately.
    */
   async ensureOnOrganisationTenderList(page, orgName, orgPageNum = 1) {
     const checkPageState = async () => {
@@ -1254,7 +1407,6 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         detailsBack.click({ noWaitAfter: true }).catch(() => {})
       ]);
 
-      // Wait until we reach TENDER_LIST
       await page.waitForFunction(() => {
         const text = document.body ? document.body.innerText : '';
         return text.includes('Organisation Chain') && text.includes('Title and Ref.No./Tender ID');
@@ -1267,7 +1419,6 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
     const clickOrgCountLink = async (targetOrg) => {
       await page.waitForSelector("table#table tr[id^='informal'], table.list_table tr", { timeout: 20000 }).catch(() => {});
-      // In NIC eProcurement: td[1] is Organisation Name (plain text), td[2] is Tender Count (clickable <a> link)
       let orgRow = page.locator("table#table tr[id^='informal'], table.list_table tr[id^='informal'], table.list_table tr")
         .filter({ hasText: targetOrg })
         .first();
@@ -1275,12 +1426,10 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       const count = await link.count().catch(() => 0);
       if (count > 0) return link;
 
-      // Fallback: any tr matching target text
       orgRow = page.locator("tr").filter({ hasText: targetOrg }).first();
       return orgRow.locator("td:nth-child(3) a, a.link2, a").first();
     };
 
-    // If on Organisation List, re-enter the organisation
     if (state === 'ORG_LIST') {
       logger.warn(`🔙 On Organisation List, re-entering "${orgName}"...`);
       const orgLink = await clickOrgCountLink(orgName);
@@ -1290,13 +1439,11 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       ]);
       await this.humanDelay(page, 500, 800);
     } else if (state !== 'TENDER_LIST') {
-      // If state is still unknown, navigate cleanly from homepage
       logger.warn(`⚠️ Navigation state unclear. Re-navigating to "${orgName}" from homepage...`);
       try {
         await page.goto(`${this.baseUrl}/nicgep/app`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       } catch (navErr) {
         if (navErr.message.includes('interrupted') || navErr.message.includes('Navigation to')) {
-          logger.warn(`page.goto was interrupted by in-flight portal navigation, waiting for load state: ${navErr.message}`);
           await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
           await this.humanDelay(page, 500, 1000);
         } else {
@@ -1318,7 +1465,6 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       await this.humanDelay(page, 500, 800);
     }
 
-    // If we were on page > 1, navigate back to that page number
     if (orgPageNum > 1) {
       await page.evaluate((target) => {
         const links = Array.from(document.querySelectorAll('a'));
@@ -1337,7 +1483,268 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   }
 
   /**
-   * Processes a downloaded PDF, compresses if > 5MB, and uploads to R2
+   * Saves or updates tender in MongoDB Atlas and uploads self-describing tender.json to Cloudflare R2.
+   * Merges subdocument arrays (nitDocuments, workItemDocuments, pdfUrls) without duplicates.
+   */
+  async saveTenderAndUploadR2(item, hasDocuments = true, docReason = '') {
+    let publishedDate = parseISTDate(item.publishedDateStr || item.publishedDate);
+    let publishedDateStr = item.publishedDateStr || (publishedDate ? extractDateParts(publishedDate).dateOnly : null);
+
+    // Invariant Lock: Published Date can NEVER exceed Document Download or Bid Submission Start Date
+    const docStart = parseISTDate(item.documentDownloadStartDateStr || item.documentDownloadStartDate);
+    const bidStart = parseISTDate(item.bidSubmissionStartDateStr || item.bidSubmissionStartDate);
+    const refStart = (docStart && docStart.getFullYear() >= 2026) ? docStart : ((bidStart && bidStart.getFullYear() >= 2026) ? bidStart : null);
+    const refStartStr = (docStart && docStart.getFullYear() >= 2026) ? (item.documentDownloadStartDateStr || item.documentDownloadStartDate) : ((bidStart && bidStart.getFullYear() >= 2026) ? (item.bidSubmissionStartDateStr || item.bidSubmissionStartDate) : null);
+
+    if (publishedDate && refStart && publishedDate.getTime() > refStart.getTime()) {
+      publishedDate = refStart;
+      publishedDateStr = refStartStr;
+      item.publishedDateStr = refStartStr;
+    }
+
+    const deptCode = item.departmentCode || extractDeptCode(item.sourceTenderId, item.organisationChain || item.departmentName);
+    const folderKey = formatTenderStorageKey(item.sourceTenderId, publishedDate, deptCode);
+
+    const docToSave = {
+      sourcePortal: 'JK_TENDERS',
+      sourceTenderId: item.sourceTenderId,
+      title: item.title || 'Untitled Tender',
+      departmentCode: deptCode,
+      departmentName: item.departmentName || (item.organisationChain ? item.organisationChain.split('||')[0].trim() : 'General'),
+      organisationChain: item.organisationChain,
+      tenderReferenceNumber: item.tenderReferenceNumber,
+      withdrawalAllowed: item.withdrawalAllowed,
+      tenderType: item.tenderType,
+      formOfContract: item.formOfContract,
+      tenderCategory: item.tenderCategory,
+      noOfCovers: item.noOfCovers,
+      generalTechnicalEvaluationAllowed: item.generalTechnicalEvaluationAllowed,
+      itemWiseTechnicalEvaluationAllowed: item.itemWiseTechnicalEvaluationAllowed,
+      paymentMode: item.paymentMode,
+      isMultiCurrencyAllowedForBOQ: item.isMultiCurrencyAllowedForBOQ,
+      isMultiCurrencyAllowedForFee: item.isMultiCurrencyAllowedForFee,
+      allowTwoStageBidding: item.allowTwoStageBidding,
+
+      tenderFee: item.tenderFee || 0,
+      feePayableTo: item.feePayableTo,
+      feePayableAt: item.feePayableAt,
+      tenderFeeExemptionAllowed: item.tenderFeeExemptionAllowed,
+
+      emdAmount: item.emdAmount || 0,
+      emdExemptionAllowed: item.emdExemptionAllowed,
+      emdFeeType: item.emdFeeType,
+      emdPercentage: item.emdPercentage,
+      emdPayableTo: item.emdPayableTo,
+      emdPayableAt: item.emdPayableAt,
+
+      workDescription: item.workDescription,
+      ndaPreQualification: item.ndaPreQualification,
+      independentExternalMonitorRemarks: item.independentExternalMonitorRemarks,
+      estimatedValue: item.estimatedValue || 0,
+      productCategory: item.productCategory,
+      subCategory: item.subCategory,
+      contractType: item.contractType,
+      bidValidityDays: item.bidValidityDays || 0,
+      periodOfWorkDays: item.periodOfWorkDays || 0,
+      location: item.location,
+      pincode: item.pincode,
+      preBidMeetingPlace: item.preBidMeetingPlace,
+      preBidMeetingAddress: item.preBidMeetingAddress,
+      preBidMeetingDate: parseISTDate(item.preBidMeetingDate),
+      bidOpeningPlace: item.bidOpeningPlace,
+      shouldAllowNDATender: item.shouldAllowNDATender,
+      allowPreferentialBidder: item.allowPreferentialBidder,
+      tendererClass: item.tendererClass,
+
+      publishedDate,
+      publishedDateStr: publishedDateStr,
+      publishedTime: formatStandardTime(publishedDateStr || publishedDate),
+      publishedDateOnly: extractDateParts(publishedDateStr || publishedDate).dateOnly,
+
+      bidOpeningDate: parseISTDate(item.bidOpeningDateStr || item.bidOpeningDate),
+      bidOpeningDateStr: item.bidOpeningDateStr || item.bidOpeningDate,
+      bidOpeningTime: formatStandardTime(item.bidOpeningDateStr || item.bidOpeningDate),
+
+      documentDownloadStartDate: parseISTDate(item.documentDownloadStartDateStr || item.documentDownloadStartDate),
+      documentDownloadStartDateStr: item.documentDownloadStartDateStr || item.documentDownloadStartDate,
+      documentDownloadStartTime: formatStandardTime(item.documentDownloadStartDateStr || item.documentDownloadStartDate),
+
+      documentDownloadEndDate: parseISTDate(item.documentDownloadEndDateStr || item.documentDownloadEndDate),
+      documentDownloadEndDateStr: item.documentDownloadEndDateStr || item.documentDownloadEndDate,
+      documentDownloadEndTime: formatStandardTime(item.documentDownloadEndDateStr || item.documentDownloadEndDate),
+
+      clarificationStartDate: parseISTDate(item.clarificationStartDateStr || item.clarificationStartDate),
+      clarificationStartDateStr: item.clarificationStartDateStr || item.clarificationStartDate,
+
+      clarificationEndDate: parseISTDate(item.clarificationEndDateStr || item.clarificationEndDate),
+      clarificationEndDateStr: item.clarificationEndDateStr || item.clarificationEndDate,
+
+      bidSubmissionStartDate: parseISTDate(item.bidSubmissionStartDateStr || item.bidSubmissionStartDate),
+      bidSubmissionStartDateStr: item.bidSubmissionStartDateStr || item.bidSubmissionStartDate,
+      bidSubmissionStartTime: formatStandardTime(item.bidSubmissionStartDateStr || item.bidSubmissionStartDate),
+
+      bidSubmissionEndDate: parseISTDate(item.bidSubmissionEndDateStr || item.bidSubmissionEndDate),
+      bidSubmissionEndDateStr: item.bidSubmissionEndDateStr || item.bidSubmissionEndDate,
+      bidSubmissionEndTime: formatStandardTime(item.bidSubmissionEndDateStr || item.bidSubmissionEndDate),
+
+      closingDate: parseISTDate(item.closingDateStr || item.closingDate) || parseISTDate(item.bidSubmissionEndDateStr || item.bidSubmissionEndDate),
+      closingDateStr: item.closingDateStr || item.closingDate || item.bidSubmissionEndDateStr || item.bidSubmissionEndDate,
+      closingTime: formatStandardTime(item.closingDateStr || item.closingDate || item.bidSubmissionEndDateStr || item.bidSubmissionEndDate),
+
+      offlineInstruments: item.offlineInstruments || [],
+      coversInfo: item.coversInfo || [],
+      otherImportantDocuments: item.otherImportantDocuments || [],
+      nitDocuments: item.nitDocuments || [],
+      workItemDocuments: item.workItemDocuments || [],
+      pdfUrls: item.pdfUrls || [],
+      boqZipUrl: item.boqZipUrl || null,
+      boqFileUrl: item.boqFileUrl || null,
+      zipFileName: item.zipFileName || null,
+      zipFileSizeKb: item.zipFileSizeKb || null,
+      isDocumentAvailable: item.isDocumentAvailable !== false,
+      pdfFetchStatus: item.pdfFetchStatus || (item.pdfUrls?.length > 0 ? 'COMPLETED' : 'PENDING'),
+      boqFetchStatus: item.boqFetchStatus || (item.boqZipUrl ? 'COMPLETED' : 'PENDING'),
+
+      invitingAuthorityName: item.invitingAuthorityName,
+      invitingAuthorityAddress: item.invitingAuthorityAddress,
+      isMultiTender: !!item.isMultiTender,
+      baseTenderId: item.baseTenderId || null,
+      relatedTenderIds: Array.isArray(item.relatedTenderIds) ? item.relatedTenderIds : [],
+      r2StorageKey: folderKey,
+      status: 'ACTIVE',
+      updatedAt: new Date()
+    };
+
+    // Subdocument merge with existing tender to prevent duplicate entries
+    const existing = await Tender.findOne({
+      sourcePortal: 'JK_TENDERS',
+      sourceTenderId: item.sourceTenderId
+    }).lean();
+
+    if (existing) {
+      const existingNit = existing.nitDocuments || [];
+      const newNit = docToSave.nitDocuments || [];
+      const mergedNit = [...existingNit];
+      for (const doc of newNit) {
+        if (!mergedNit.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
+          mergedNit.push(doc);
+        }
+      }
+      docToSave.nitDocuments = mergedNit;
+
+      const existingPdfs = existing.pdfUrls || [];
+      const newPdfs = docToSave.pdfUrls || [];
+      docToSave.pdfUrls = Array.from(new Set([...existingPdfs, ...newPdfs]));
+
+      const existingWork = existing.workItemDocuments || [];
+      const newWork = docToSave.workItemDocuments || [];
+      const mergedWork = [...existingWork];
+      for (const doc of newWork) {
+        if (!mergedWork.some(e => (doc.fileUrl && e.fileUrl === doc.fileUrl) || (doc.documentName && e.documentName === doc.documentName))) {
+          mergedWork.push(doc);
+        }
+      }
+      docToSave.workItemDocuments = mergedWork;
+
+      if (!docToSave.boqFileUrl && existing.boqFileUrl) {
+        docToSave.boqFileUrl = existing.boqFileUrl;
+      }
+      if (!docToSave.boqZipUrl && existing.boqZipUrl) {
+        docToSave.boqZipUrl = existing.boqZipUrl;
+        docToSave.zipFileName = existing.zipFileName;
+        docToSave.zipFileSizeKb = existing.zipFileSizeKb;
+      }
+    }
+
+    // 1. Upsert in MongoDB Atlas
+    const saved = await Tender.findOneAndUpdate(
+      { sourcePortal: 'JK_TENDERS', sourceTenderId: item.sourceTenderId },
+      { $set: docToSave },
+      { upsert: true, returnDocument: 'after' }
+    ).lean();
+
+    // 1b. Multi-tender sibling link updates
+    if (saved.isMultiTender && saved.baseTenderId) {
+      await Tender.updateMany(
+        {
+          sourcePortal: 'JK_TENDERS',
+          $or: [
+            { baseTenderId: saved.baseTenderId },
+            { tenderReferenceNumber: saved.tenderReferenceNumber }
+          ],
+          sourceTenderId: { $ne: saved.sourceTenderId }
+        },
+        {
+          $set: { isMultiTender: true, baseTenderId: saved.baseTenderId },
+          $addToSet: { relatedTenderIds: saved.sourceTenderId }
+        }
+      ).catch(() => {});
+    }
+
+    // 2. Upload tender.json directly to Cloudflare R2
+    try {
+      await uploadJsonToR2({
+        jsonData: saved,
+        fileName: 'tender.json',
+        tenderId: item.sourceTenderId,
+        publishedDate,
+        deptCode
+      });
+    } catch (r2Err) {
+      logger.warn(`Could not upload tender.json to R2 for ${item.sourceTenderId}: ${r2Err.message}`);
+    }
+
+    // 3. Register or update in PendingDocumentTender
+    if (hasDocuments) {
+      await PendingDocumentTender.findOneAndUpdate(
+        { sourceTenderId: saved.sourceTenderId },
+        { $set: { status: 'DOWNLOADED', downloadedAt: new Date(), lastCheckedAt: new Date() } }
+      ).catch(() => {});
+    } else {
+      const isFuture = docToSave.documentDownloadStartDate && docToSave.documentDownloadStartDate > new Date();
+      await PendingDocumentTender.findOneAndUpdate(
+        { sourceTenderId: saved.sourceTenderId },
+        {
+          $set: {
+            sourcePortal: 'JK_TENDERS',
+            sourceTenderId: saved.sourceTenderId,
+            tenderReferenceNumber: saved.tenderReferenceNumber || '',
+            title: saved.title,
+            organisationChain: saved.organisationChain || saved.departmentName,
+            departmentName: saved.departmentName,
+            departmentCode: saved.departmentCode,
+            tenderCategory: saved.tenderCategory || '',
+            estimatedValue: saved.estimatedValue || 0,
+            publishedDateStr: saved.publishedDateStr,
+            publishedDate: saved.publishedDate,
+            publishedTime: saved.publishedTime,
+            documentDownloadStartDateStr: docToSave.documentDownloadStartDateStr,
+            documentDownloadStartDate: docToSave.documentDownloadStartDate,
+            documentDownloadEndDateStr: docToSave.documentDownloadEndDateStr,
+            documentDownloadEndDate: docToSave.documentDownloadEndDate,
+            bidSubmissionStartDateStr: docToSave.bidSubmissionStartDateStr,
+            bidSubmissionStartDate: docToSave.bidSubmissionStartDate,
+            bidSubmissionEndDateStr: docToSave.bidSubmissionEndDateStr,
+            bidSubmissionEndDate: docToSave.bidSubmissionEndDate,
+            bidOpeningDateStr: docToSave.bidOpeningDateStr,
+            bidOpeningDate: docToSave.bidOpeningDate,
+            hasDownloadLinks: (docToSave.nitDocuments?.length > 0 || docToSave.isDocumentAvailable),
+            portalTenderUrl: 'https://jktenders.gov.in',
+            reason: docReason || (isFuture ? `Document download start date in future: ${docToSave.documentDownloadStartDateStr}` : 'Portal documents not yet available for download'),
+            status: isFuture ? 'AWAITING_DOWNLOAD_DATE' : 'READY_TO_DOWNLOAD',
+            lastCheckedAt: new Date()
+          },
+          $inc: { attemptCount: 1 }
+        },
+        { upsert: true, new: true }
+      ).catch(() => {});
+    }
+
+    return saved;
+  }
+
+  /**
+   * Processes a downloaded PDF, compresses if > 5MB via Ghostscript, and uploads directly to R2 under primary key.
    */
   async processDownloadedPdf(download, item, processedFileNames, docDescription = 'Tender Notice Document', docSNo = 1, docDeclaredSize = null) {
     try {
@@ -1369,6 +1776,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         fileName,
         tenderId: item.sourceTenderId,
         publishedDate: item.publishedDate,
+        deptCode: item.departmentCode,
         contentType: 'application/pdf',
       });
 
@@ -1400,7 +1808,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   async processDownloadedZip(zipDownload, item) {
     try {
       const tempZipPath = await zipDownload.path().catch(() => null);
-      if (!tempZipPath || !fs.existsSync(tempZipPath)) return;
+      if (!tempZipPath || !fs.existsSync(tempZipPath)) return false;
 
       const fileName = zipDownload.suggestedFilename() || `Tender_Packet_${item.sourceTenderId}.zip`;
       const stats = fs.statSync(tempZipPath);
@@ -1413,12 +1821,13 @@ export class JKTenderAdapter extends TenderSourceAdapter {
         fileName,
         tenderId: item.sourceTenderId,
         publishedDate: item.publishedDate,
+        deptCode: item.departmentCode,
         contentType: 'application/zip',
       });
 
       if (r2Url) {
         item.boqZipUrl = r2Url;
-        item.boqFileUrl = r2Url; // Keep for backwards compatibility
+        item.boqFileUrl = r2Url;
         item.zipFileName = fileName;
         item.zipFileSizeKb = fileSizeKb;
         item.boqFetchStatus = 'COMPLETED';
@@ -1429,9 +1838,11 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       }
 
       if (fs.existsSync(tempZipPath)) fs.unlinkSync(tempZipPath);
+      return !!r2Url;
     } catch (err) {
       logger.error(`Error processing downloaded ZIP: ${err.message}`);
       item.boqFetchStatus = 'FAILED';
+      return false;
     }
   }
 
@@ -1443,110 +1854,77 @@ export class JKTenderAdapter extends TenderSourceAdapter {
   }
 
   /**
-   * Resolves search form captcha on pages like FrontEndLatestActiveTenders
+   * Resolves search form captcha (e.g. Latest Active Tenders listing)
    */
   async handleSearchFormCaptcha(page, formName = 'Active Tenders Search') {
-    const captchaImgLocator = page.locator("img[name='captchaImage'], #captchaImage, img[src*='captcha']").first();
-    const hasCaptcha = await captchaImgLocator.isVisible({ timeout: 3000 }).catch(() => false);
-    if (!hasCaptcha) return true;
+    const captchaImg = page.locator("img[name='captchaImage'], #captchaImage").first();
+    const isVisible = await captchaImg.isVisible({ timeout: 4000 }).catch(() => false);
+    if (!isVisible) return true;
 
-    logger.info(`[Search Form] Captcha detected on ${formName}`);
-    const inputLocator = page.locator("input[name='captchaText'], #captchaText, input[name*='captcha']").first();
-    await inputLocator.focus().catch(() => {});
-    await page.bringToFront().catch(() => {});
+    logger.info(`🔑 Captcha encountered on "${formName}" page. Solving...`);
+    const inputLocator = page.locator("input[name='captchaText'], #captchaText").first();
+    const submitLocator = page.locator("#Submit, input[type='submit'][value*='Submit']").first();
 
     const maxAttempts = 10;
-
     if (captchaService.isAutoSolveEnabled()) {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const isImgVisible = await captchaImgLocator.isVisible({ timeout: 3000 }).catch(() => false);
-          if (!isImgVisible) {
-            logger.info(`✅ [Auto-Captcha Search] Captcha passed on ${formName}!`);
-            return true;
-          }
+          const imgIsVisible = await captchaImg.isVisible({ timeout: 2000 }).catch(() => false);
+          if (!imgIsVisible) return true;
 
-          logger.info(`🔄 [Auto-Captcha Search] Attempt ${attempt}/${maxAttempts} on ${formName}...`);
-          
-          // Allow full render time to capture high-clarity captcha image
           await page.waitForTimeout(1800);
-
-          const imgBuffer = await captchaImgLocator.screenshot().catch(() => null);
-          if (!imgBuffer) {
-            logger.warn(`[Auto-Captcha Search] Could not screenshot captcha on attempt ${attempt}`);
-            continue;
-          }
+          const imgBuffer = await captchaImg.screenshot().catch(() => null);
+          if (!imgBuffer) continue;
 
           const { text: solvedText, provider } = await captchaService.solveImageCaptcha(imgBuffer);
-          if (!solvedText || solvedText.length < 4) {
-            logger.warn(`[Auto-Captcha Search] Solver returned invalid text ("${solvedText}") on attempt ${attempt}`);
-            continue;
-          }
+          if (!solvedText || solvedText.length < 4) continue;
 
-          logger.info(`[Auto-Captcha Search] Attempt ${attempt}: Solved via ${provider} as "${solvedText}". Entering and waiting 2s before submit...`);
-          await inputLocator.click().catch(() => {});
+          logger.info(`[Auto-Captcha] Attempt ${attempt} (${provider}) on "${formName}": "${solvedText}"`);
           await inputLocator.fill('');
           await inputLocator.fill(solvedText);
           await inputLocator.dispatchEvent('input').catch(() => {});
           await inputLocator.dispatchEvent('change').catch(() => {});
-          
-          // Wait 2 full seconds after entering before submitting
           await page.waitForTimeout(2000);
 
-          const submitLocator = page.locator("#Submit, input[type='submit'][value*='Search'], input[type='submit'], #submit").first();
           await Promise.all([
             page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
             submitLocator.click({ force: true, timeout: 5000 }).catch(async () => {
               await inputLocator.press('Enter').catch(() => {});
             })
           ]);
-
           await page.waitForTimeout(1500);
 
-          const passed = !(await captchaImgLocator.isVisible({ timeout: 2000 }).catch(() => false));
-          if (passed) {
-            logger.info(`✅ [Auto-Captcha Search] Passed on attempt ${attempt}!`);
+          const stillVisible = await captchaImg.isVisible({ timeout: 3000 }).catch(() => false);
+          if (!stillVisible) {
+            logger.info(`✅ Captcha on "${formName}" solved on attempt ${attempt}!`);
             return true;
           }
 
-          logger.warn(`⚠️ [Auto-Captcha Search] Attempt ${attempt}/${maxAttempts} rejected by portal. Retrying...`);
-          
-          // Refresh captcha if refresh button available
-          const refreshBtn = page.locator("#captcha, button:has-text('Refresh'), a:has-text('Refresh')").first();
+          const refreshBtn = page.locator("#captcha, button:has-text('Refresh')").first();
           if (await refreshBtn.isVisible().catch(() => false)) {
             await refreshBtn.click().catch(() => {});
             await page.waitForTimeout(1000);
           }
         } catch (e) {
-          logger.warn(`[Auto-Captcha Search] Attempt ${attempt} error: ${e.message}`);
           await page.waitForTimeout(1000);
         }
       }
-
-      logger.warn(`❌ [Auto-Captcha Search] All ${maxAttempts} automatic attempts failed for ${formName}.`);
     }
 
-    // Manual search captcha fallback
-    console.log('\n======================================================');
-    console.log(`🔑 [MANUAL SEARCH CAPTCHA] Required for ${formName}`);
-    console.log(`👉 Please view the browser window, type the captcha, and click Search!`);
-    console.log('======================================================\n');
-
+    // Manual fallback
+    console.log(`\n🔑 Please solve captcha for "${formName}" in browser (Timeout: 2 mins)...`);
     try {
       await page.waitForFunction(() => {
-        const rows = document.querySelectorAll('table.list_table tr');
-        return Array.from(rows).some(r => r.querySelector("a[href*='FrontEndTenderDetails'], td a"));
-      }, { timeout: 120000 });
-      logger.info('✅ Search form successfully submitted. Tender list loaded!');
+        return !document.querySelector("img[name='captchaImage'], #captchaImage");
+      }, undefined, { timeout: 120000 });
       return true;
-    } catch (waitErr) {
-      logger.warn(`Search results wait timed out: ${waitErr.message}`);
+    } catch {
       return false;
     }
   }
 
   /**
-   * Backfill / Retry Missing PDFs for Tenders flagged with pdfFetchStatus === 'PENDING'
+   * Retries missing PDFs for pending tenders
    */
   async retryMissingPdfs(tenderDocs = [], onProgress = null) {
     if (!tenderDocs || tenderDocs.length === 0) return { updatedCount: 0 };
@@ -1557,32 +1935,34 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       args: ['--no-sandbox'] 
     });
     const context = await browser.newContext({ acceptDownloads: true });
+    const page = await context.newPage();
     let updatedCount = 0;
 
     try {
       for (const tender of tenderDocs) {
-        if (!tender.detailsUrl) continue;
+        if (!tender.detailsUrl && !tender.sourceTenderId) continue;
 
         logger.info(`[PDF Retry] Attempting download for ${tender.sourceTenderId}...`);
         const itemMock = { ...tender.toObject(), pdfUrls: [], nitDocuments: [] };
-        const { processedItem, pdfCount } = await this.scrapeTenderDetailAndPdf(context, itemMock);
+        
+        let scrapeSuccess = false;
+        try {
+          if (tender.detailsUrl) {
+            await page.goto(tender.detailsUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          }
+          const { processedItem, pdfCount, boqCount, hasDocuments, docReason } = await this.scrapeTenderDetailAndPdfInPage(page, itemMock, tender.departmentName || 'General');
 
-        if (pdfCount > 0 && processedItem.pdfUrls.length > 0) {
-          tender.pdfUrls = processedItem.pdfUrls;
-          tender.nitDocuments = processedItem.nitDocuments;
-          if (processedItem.workItemDocuments && processedItem.workItemDocuments.length > 0) {
-            tender.workItemDocuments = processedItem.workItemDocuments;
+          if (pdfCount > 0 && processedItem.pdfUrls.length > 0) {
+            await this.saveTenderAndUploadR2(processedItem, hasDocuments, docReason);
+            updatedCount++;
+            scrapeSuccess = true;
+            logger.info(`✅ Successfully recovered ${pdfCount} PDF(s) for ${tender.sourceTenderId}`);
           }
-          if (processedItem.boqFileUrl) {
-            tender.boqFileUrl = processedItem.boqFileUrl;
-            tender.boqFetchStatus = 'COMPLETED';
-          }
-          tender.pdfFetchStatus = 'COMPLETED';
-          tender.pdfRetryCount = (tender.pdfRetryCount || 0) + 1;
-          await tender.save();
-          updatedCount++;
-          logger.info(`✅ Successfully recovered ${pdfCount} PDF(s) and ${tender.workItemDocuments?.length || 0} work item document(s) for ${tender.sourceTenderId}`);
-        } else {
+        } catch (retryErr) {
+          logger.warn(`Failed retry on ${tender.sourceTenderId}: ${retryErr.message}`);
+        }
+
+        if (!scrapeSuccess) {
           tender.pdfRetryCount = (tender.pdfRetryCount || 0) + 1;
           if (tender.pdfRetryCount >= 3) {
             tender.pdfFetchStatus = 'NOT_AVAILABLE';
@@ -1629,6 +2009,7 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
       offlineInstruments: rawTenderData.offlineInstruments || [],
       coversInfo: rawTenderData.coversInfo || [],
+      otherImportantDocuments: rawTenderData.otherImportantDocuments || [],
 
       tenderFee: rawTenderData.tenderFee || 0,
       feePayableTo: rawTenderData.feePayableTo,
@@ -1645,12 +2026,12 @@ export class JKTenderAdapter extends TenderSourceAdapter {
       workDescription: rawTenderData.workDescription,
       ndaPreQualification: rawTenderData.ndaPreQualification,
       independentExternalMonitorRemarks: rawTenderData.independentExternalMonitorRemarks,
-      estimatedValue: rawTenderData.estimatedValue,
+      estimatedValue: rawTenderData.estimatedValue || 0,
       productCategory: rawTenderData.productCategory,
       subCategory: rawTenderData.subCategory,
       contractType: rawTenderData.contractType,
-      bidValidityDays: rawTenderData.bidValidityDays,
-      periodOfWorkDays: rawTenderData.periodOfWorkDays,
+      bidValidityDays: rawTenderData.bidValidityDays || 0,
+      periodOfWorkDays: rawTenderData.periodOfWorkDays || 0,
       location: rawTenderData.location,
       pincode: rawTenderData.pincode,
       preBidMeetingPlace: rawTenderData.preBidMeetingPlace,
@@ -1702,7 +2083,13 @@ export class JKTenderAdapter extends TenderSourceAdapter {
 
       invitingAuthorityName: rawTenderData.invitingAuthorityName,
       invitingAuthorityAddress: rawTenderData.invitingAuthorityAddress,
-      status: 'ACTIVE'
+      isMultiTender: !!rawTenderData.isMultiTender,
+      baseTenderId: rawTenderData.baseTenderId || null,
+      relatedTenderIds: Array.isArray(rawTenderData.relatedTenderIds) ? rawTenderData.relatedTenderIds : [],
+      status: 'ACTIVE',
+      updatedAt: new Date()
     };
   }
 }
+
+export default JKTenderAdapter;
