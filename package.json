@@ -6,6 +6,7 @@
   "scripts": {
     "manual:disaster": "npm --prefix backend run manual:disaster",
     "manual:deployment": "npm --prefix backend run manual:deployment",
+    "manual:adapters": "npm --prefix backend run manual:adapters",
     "manuals:all": "npm --prefix backend run manuals:all",
     "backup:db": "npm --prefix backend run backup:db",
     "sync:mirror": "npm --prefix backend run sync:mirror",

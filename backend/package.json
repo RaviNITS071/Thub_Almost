@@ -28,7 +28,8 @@
     "manual:deployment": "node src/scripts/generateDeploymentPdf.js",
     "manual:future": "node src/scripts/generateFutureConfigPdf.js",
     "report:pdf": "node src/scripts/generateCrawlReportPdf.js",
-    "manuals:all": "node src/scripts/generateDisasterRecoveryPdf.js && node src/scripts/generateDeploymentPdf.js && node src/scripts/generateFutureConfigPdf.js && node src/scripts/generateCrawlReportPdf.js",
+    "manual:adapters": "node src/scripts/generateAdaptersGuidePdf.js",
+    "manuals:all": "node src/scripts/generateDisasterRecoveryPdf.js && node src/scripts/generateDeploymentPdf.js && node src/scripts/generateFutureConfigPdf.js && node src/scripts/generateCrawlReportPdf.js && node src/scripts/generateAdaptersGuidePdf.js",
     "sync:mirror": "node src/scripts/syncR2Mirror.js"
   },
   "keywords": [],
